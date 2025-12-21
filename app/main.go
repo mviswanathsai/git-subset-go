@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bytes"
+	"bufio"
 	"compress/zlib"
 	"fmt"
 	"io"
@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	objdir = ".git/objects"
+	objdir         = ".git/objects"
+	objheaderdelim = 0
 )
 
 // Usage: your_program.sh <command> <arg1> <arg2> ...
@@ -51,23 +52,16 @@ func main() {
 			return
 		}
 
-		var b bytes.Buffer
-		r, err := zlib.NewReader(f)
-		if err != nil {
-			fmt.Print(err)
-			return
-		}
-		io.Copy(&b, r)
-		r.Close()
-
-		// advance the cursor after header
-		_, err = b.ReadBytes(0)
+		zr, err := zlib.NewReader(f)
+		defer zr.Close()
 		if err != nil {
 			fmt.Print(err)
 			return
 		}
 
-		fmt.Print(b.String())
+		r := bufio.NewReader(zr)
+		r.ReadBytes(objheaderdelim)
+		io.Copy(os.Stdout, r)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
