@@ -82,15 +82,15 @@ func main() {
 			}
 		}
 
-        var tmpw io.Writer
+		var tmpw io.Writer
 		if write {
-            tmpf, err := os.CreateTemp(gitObjDir, "tmp_obj_")
+			tmpf, err := os.CreateTemp(gitObjDir, "tmp_obj_")
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error creating temp file: %v\n", err)
 				os.Exit(1)
 			}
 			defer os.Remove(tmpf.Name())
-            tmpw = tmpf
+			tmpw = tmpf
 		} else {
 			tmpw = io.Discard
 		}
@@ -111,7 +111,7 @@ func main() {
 
 		hash := sha1.New()
 		zw := zlib.NewWriter(tmpw)
-        mw := io.MultiWriter(hash, zw)
+		mw := io.MultiWriter(hash, zw)
 
 		mw.Write([]byte(header))
 		_, err = io.Copy(mw, df)
@@ -119,8 +119,8 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error hashing/compressing object: %v\n", err)
 			os.Exit(1)
 		}
-        h := fmt.Sprintf("%x", hash.Sum(nil))
-        zw.Close()
+		h := fmt.Sprintf("%x", hash.Sum(nil))
+		zw.Close()
 
 		if !write {
 			// Print the hex encoding of the hash.
@@ -128,12 +128,12 @@ func main() {
 			return
 		}
 
-        tmpf, ok := tmpw.(*os.File)
-        if !ok {
-            fmt.Fprintf(os.Stderr, "Fatal: tmpw is of unexpected type %T", tmpw)
+		tmpf, ok := tmpw.(*os.File)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "Fatal: tmpw is of unexpected type %T", tmpw)
 			os.Exit(1)
-        }
-        tmpf.Close()
+		}
+		tmpf.Close()
 
 		objDirName, objFileName := pathFromHash(h)
 		err = os.Mkdir(fp.Join(gitObjDir, objDirName), 0775)
@@ -143,20 +143,42 @@ func main() {
 		}
 
 		objFilePath := fp.Join(gitObjDir, objDirName, objFileName)
-        os.Rename(tmpf.Name(), objFilePath)
+		os.Rename(tmpf.Name(), objFilePath)
 
 		// Print the hex encoding of the hash.
 		fmt.Print(h)
 
+	case "ls-tree":
+		var treeh string
+		if len(os.Args) == 4 {
+			if os.Args[2] != "--name-only" {
+				fmt.Fprintf(os.Stderr, "Unknown argument %s for command ls-tree\n", os.Args[2])
+			}
+			treeh = os.Args[3]
+		}
+
+		// given a hash, read the file and output
+		objDirName, objFileName := pathFromHash(treeh)
+		filepath := fp.Join(gitObjDir, objDirName, objFileName)
+		f, err := os.Open(filepath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error opening file: %v\n", err)
+			os.Exit(1)
+		}
+
+		zr, err := zlib.NewReader(f)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
+			os.Exit(1)
+		}
+		io.Copy(os.Stderr, zr)
+		//		r := bufio.NewReader(zr)
+
+		//		tree := string(b)
+		// fmt.Print(tree)
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
-		os.Exit(1)
-	}
-}
-
-func check(err error) {
-	if err != nil {
-		fmt.Print(err)
 		os.Exit(1)
 	}
 }
