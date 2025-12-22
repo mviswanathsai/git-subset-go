@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -12,7 +13,7 @@ import (
 	"os"
 	fp "path/filepath"
 	"slices"
-    "strings"
+	"strings"
 )
 
 const (
@@ -158,6 +159,8 @@ func main() {
 			}
 			treeh = os.Args[3]
 			nameonly = true
+		} else {
+			treeh = os.Args[2]
 		}
 
 		// given a hash, read the file and output
@@ -181,37 +184,38 @@ func main() {
 			os.Exit(1)
 		}
 
-		var i int
-		var fnames []string
-		var fmodes []string
-		var fhashes []string
+		// Trim the tree header
+		delimIdx := bytes.IndexByte(b, '\x00')
+		b = b[delimIdx+1:]
+
+		var out []string
 		for {
 			spaceIdx := bytes.IndexByte(b, ' ')
 			delimIdx := bytes.IndexByte(b, '\x00')
 
-			if i == 0 {
-				b = b[delimIdx+1:]
-				i++
-				continue
+			if spaceIdx == -1 || delimIdx == -1 {
+				fmt.Fprintf(os.Stderr, "Unexpected absence of delim tokens")
 			}
 
-			fmodes = append(fmodes, string(b[:spaceIdx]))
-			fnames = append(fnames, string(b[spaceIdx+1:delimIdx]))
-			fhashes = append(fhashes, string(b[delimIdx+1:delimIdx+21]))
+			modei := string(b[:spaceIdx])
+			namei := string(b[spaceIdx+1 : delimIdx])
+			hashi := hex.EncodeToString(b[delimIdx+1 : delimIdx+21])
+
+			if nameonly {
+				out = append(out, namei)
+			} else {
+				out = append(out, fmt.Sprintf("%s %s %s", modei, hashi, namei))
+			}
 
 			if len(b[delimIdx+1:]) == 20 {
 				break
 			}
 
 			b = b[delimIdx+21:]
-			i++
 		}
 
-		if nameonly {
-            slices.Sort(fnames)
-            pfnames := strings.Join(fnames, "\n")
-			fmt.Printf("%v\n", pfnames)
-		}
+		slices.Sort(out)
+		fmt.Printf("%v\n", strings.Join(out, "\n"))
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
