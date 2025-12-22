@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"compress/zlib"
 	"crypto/sha1"
 	"errors"
@@ -10,6 +11,8 @@ import (
 	"io/fs"
 	"os"
 	fp "path/filepath"
+	"slices"
+    "strings"
 )
 
 const (
@@ -19,9 +22,6 @@ const (
 
 // Usage: your_program.sh <command> <arg1> <arg2> ...
 func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Fprintf(os.Stderr, "Logs from your program will appear here!\n")
-
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: mygit <command> [<args>...]\n")
 		os.Exit(1)
@@ -150,11 +150,14 @@ func main() {
 
 	case "ls-tree":
 		var treeh string
+		var nameonly bool
 		if len(os.Args) == 4 {
 			if os.Args[2] != "--name-only" {
 				fmt.Fprintf(os.Stderr, "Unknown argument %s for command ls-tree\n", os.Args[2])
+				os.Exit(1)
 			}
 			treeh = os.Args[3]
+			nameonly = true
 		}
 
 		// given a hash, read the file and output
@@ -171,11 +174,44 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
 			os.Exit(1)
 		}
-		io.Copy(os.Stderr, zr)
-		//		r := bufio.NewReader(zr)
 
-		//		tree := string(b)
-		// fmt.Print(tree)
+		b, err := io.ReadAll(zr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
+			os.Exit(1)
+		}
+
+		var i int
+		var fnames []string
+		var fmodes []string
+		var fhashes []string
+		for {
+			spaceIdx := bytes.IndexByte(b, ' ')
+			delimIdx := bytes.IndexByte(b, '\x00')
+
+			if i == 0 {
+				b = b[delimIdx+1:]
+				i++
+				continue
+			}
+
+			fmodes = append(fmodes, string(b[:spaceIdx]))
+			fnames = append(fnames, string(b[spaceIdx+1:delimIdx]))
+			fhashes = append(fhashes, string(b[delimIdx+1:delimIdx+21]))
+
+			if len(b[delimIdx+1:]) == 20 {
+				break
+			}
+
+			b = b[delimIdx+21:]
+			i++
+		}
+
+		if nameonly {
+            slices.Sort(fnames)
+            pfnames := strings.Join(fnames, "\n")
+			fmt.Printf("%v\n", pfnames)
+		}
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
