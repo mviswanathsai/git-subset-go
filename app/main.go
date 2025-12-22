@@ -79,25 +79,38 @@ func main() {
 			}
 		}
 
+        info, err := os.Stat(filename)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error fetching file info: %v\n", err)
+			os.Exit(1)
+		}
+
 		// Read file and get hash
-		d, err := os.ReadFile(filename)
+		df, err := os.Open(filename)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
 			os.Exit(1)
 		}
-		c := fmt.Sprintf("blob %d\x00%s", len(d), d)
+		header := fmt.Sprintf("blob %d\x00", info.Size())
 
+        // Stream data into the hash
 		hash := sha1.New()
-		io.WriteString(hash, c)
+        hash.Write([]byte(header))
+        _, err = io.Copy(hash, df)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating object hash: %v\n", err)
+			os.Exit(1)
+		}
 		h := fmt.Sprintf("%x", hash.Sum(nil))
 
 		if len(os.Args) == 3 {
+			// Print the hex encoding of the hash.
 			fmt.Println(h)
 			return
 		}
 
 		objDirName, objFileName := pathFromHash(h)
-		err = os.Mkdir(fp.Join(gitObjDir, objDirName), 0755)
+		err = os.Mkdir(fp.Join(gitObjDir, objDirName), 0775)
 		if err != nil && !errors.Is(err, fs.ErrExist) {
 			fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
 			os.Exit(1)
@@ -113,12 +126,16 @@ func main() {
 
 		// Compress file
 		w := zlib.NewWriter(f)
-		_, err = w.Write([]byte(c))
+        w.Write([]byte(header))
+        // Seek to the beginning of the file
+        df.Seek(0,0)
+		_, err = io.Copy(w, df)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error compressing file: %v\n", err)
 			os.Exit(1)
 		}
 		w.Close()
+		// Print the hex encoding of the hash.
 		fmt.Print(h)
 
 	default:
