@@ -68,46 +68,72 @@ func main() {
 
 	case "hash-object":
 		var filename string
+		var write bool
+
 		if len(os.Args) == 3 {
 			filename = os.Args[2]
 		} else if len(os.Args) == 4 {
 			if os.Args[2] == "-w" {
 				filename = os.Args[3]
+				write = true
 			} else {
 				fmt.Fprintf(os.Stderr, "Unknown flag %s for command hash-object\n", os.Args[2])
 				os.Exit(1)
 			}
 		}
 
-        info, err := os.Stat(filename)
+        var tmpw io.Writer
+		if write {
+            tmpf, err := os.CreateTemp(gitObjDir, "tmp_obj_")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error creating temp file: %v\n", err)
+				os.Exit(1)
+			}
+			defer os.Remove(tmpf.Name())
+            tmpw = tmpf
+		} else {
+			tmpw = io.Discard
+		}
+
+		info, err := os.Stat(filename)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error fetching file info: %v\n", err)
 			os.Exit(1)
 		}
 
-		// Read file and get hash
 		df, err := os.Open(filename)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
 			os.Exit(1)
 		}
+
 		header := fmt.Sprintf("blob %d\x00", info.Size())
 
-        // Stream data into the hash
 		hash := sha1.New()
-        hash.Write([]byte(header))
-        _, err = io.Copy(hash, df)
+		zw := zlib.NewWriter(tmpw)
+        mw := io.MultiWriter(hash, zw)
+
+		mw.Write([]byte(header))
+		_, err = io.Copy(mw, df)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error creating object hash: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error hashing/compressing object: %v\n", err)
 			os.Exit(1)
 		}
-		h := fmt.Sprintf("%x", hash.Sum(nil))
+        h := fmt.Sprintf("%x", hash.Sum(nil))
+        zw.Close()
 
-		if len(os.Args) == 3 {
+		if !write {
 			// Print the hex encoding of the hash.
 			fmt.Println(h)
 			return
 		}
+
+        tmpf, ok := tmpw.(*os.File)
+        if !ok {
+            fmt.Fprintf(os.Stderr, "Fatal: tmpw is of unexpected type %T", tmpw)
+			os.Exit(1)
+        }
+        tmpf.Close()
 
 		objDirName, objFileName := pathFromHash(h)
 		err = os.Mkdir(fp.Join(gitObjDir, objDirName), 0775)
@@ -117,24 +143,8 @@ func main() {
 		}
 
 		objFilePath := fp.Join(gitObjDir, objDirName, objFileName)
-		f, err := os.Create(objFilePath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error creating file: %v\n", err)
-			os.Exit(1)
-		}
-		defer f.Close()
+        os.Rename(tmpf.Name(), objFilePath)
 
-		// Compress file
-		w := zlib.NewWriter(f)
-        w.Write([]byte(header))
-        // Seek to the beginning of the file
-        df.Seek(0,0)
-		_, err = io.Copy(w, df)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error compressing file: %v\n", err)
-			os.Exit(1)
-		}
-		w.Close()
 		// Print the hex encoding of the hash.
 		fmt.Print(h)
 
