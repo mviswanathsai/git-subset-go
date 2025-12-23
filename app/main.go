@@ -229,11 +229,15 @@ func main() {
 
 		t := time.Now()
 		timestamp := t.Unix()
-		_, offset := t.Zone()
+		offset := t.Format("-0700")
 
-		payload := fmt.Sprintf("tree %s\nparent %s\nauthor %s <%s> %d %s\n\n%s", treesha, commitsha, author, email, timestamp, offset, message)
-		b := bytes.NewBuffer([]byte(payload))
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "tree %s\n", treesha)
+		fmt.Fprintf(&sb, "parent %s\n", commitsha)
+		fmt.Fprintf(&sb, "author %s <%s> %d %s\n", author, email, timestamp, offset)
+		fmt.Fprintf(&sb, "\n%s\n", message)
 
+		b := bytes.NewBuffer([]byte(sb.String()))
 		hash := sha1.New()
 		zw := zlib.NewWriter(tmpf)
 		mw := io.MultiWriter(hash, zw)
