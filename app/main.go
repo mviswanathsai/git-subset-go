@@ -19,7 +19,10 @@ import (
 const (
 	gitObjDir      = ".git/objects"
 	objheaderdelim = 0
-	xmode          = fs.FileMode(0111)
+	gitExModeOct   = fs.FileMode(0111)
+	gitDirMode     = "40000"
+	gitRegMode     = "100644"
+	gitExMode      = "100755"
 )
 
 // Usage: your_program.sh <command> <arg1> <arg2> ...
@@ -93,20 +96,13 @@ func main() {
 			tmpw = io.Discard
 		}
 
-		df, info := returnFile(filename)
-
-		header := getBlobObjHeader(info.Size())
+		f, finfo := openFile(filename)
 
 		hash := sha1.New()
 		zw := zlib.NewWriter(tmpw)
 		mw := io.MultiWriter(hash, zw)
+        writeGitObject(mw, "blob", int(finfo.Size()), f)
 
-		mw.Write([]byte(header))
-		_, err := io.Copy(mw, df)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error hashing/compressing object: %v\n", err)
-			os.Exit(1)
-		}
 		h := fmt.Sprintf("%x", hash.Sum(nil))
 		zw.Close()
 
@@ -123,8 +119,8 @@ func main() {
 		}
 		tmpf.Close()
 
-		objDirName, objFileName := pathFromHash(h)
-		err = os.Mkdir(fp.Join(gitObjDir, objDirName), 0775)
+		objDirName, objFileName := decomposeHash(h)
+        err := os.Mkdir(fp.Join(gitObjDir, objDirName), 0775)
 		if err != nil && !errors.Is(err, fs.ErrExist) {
 			fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
 			os.Exit(1)
@@ -151,7 +147,7 @@ func main() {
 		}
 
 		// given a hash, read the file and output
-		objDirName, objFileName := pathFromHash(treeh)
+		objDirName, objFileName := decomposeHash(treeh)
 		filepath := fp.Join(gitObjDir, objDirName, objFileName)
 		f, err := os.Open(filepath)
 		if err != nil {
@@ -175,7 +171,7 @@ func main() {
 		delimIdx := bytes.IndexByte(b, '\x00')
 		b = b[delimIdx+1:]
 
-		out := generateTreeEntries(b, nameonly)
+		out := parseTreeObject(b, nameonly)
 		slices.Sort(out)
 		fmt.Printf("%v\n", strings.Join(out, "\n"))
 
@@ -185,28 +181,40 @@ func main() {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error getting current working dir: %v\n", err)
 		}
-		fmt.Println("The current working directory: ", ex)
 
-		cwdFS := os.DirFS(ex)
+		cwd, err := os.ReadDir(ex)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting current working dir: %v\n", err)
+		}
 
-		var treeEntries []string
+		tree := generateTreePayload(cwd, ".")
 
-		// Walk the current working directory
-		fs.WalkDir(cwdFS, ".", func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error walking current working dir: %v\n", err)
-				os.Exit(1)
-			}
-			str, err := generateTreeObject(path, d, treeEntries)
-			if err != nil {
-				return err
-			}
+		tmpf := createTempObjFile()
+		defer os.Remove(tmpf.Name())
 
-			treeEntries = append(treeEntries, str)
-			return nil
-		})
-		out := strings.Join(treeEntries, "")
-		fmt.Print("Out: ", out)
+		hash := sha1.New()
+		zw := zlib.NewWriter(tmpf)
+		mw := io.MultiWriter(hash, zw)
+
+		writeGitObject(mw, "tree", tree.Len(), tree)
+		zw.Close()
+		tmpf.Close()
+		h := hex.EncodeToString(hash.Sum(nil))
+
+		objDirName, objFileName := decomposeHash(h)
+		err = os.Mkdir(fp.Join(gitObjDir, objDirName), 0775)
+		if err != nil && !errors.Is(err, fs.ErrExist) {
+			fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
+			os.Exit(1)
+		}
+
+		objFilePath := fp.Join(gitObjDir, objDirName, objFileName)
+		if os.Rename(tmpf.Name(), objFilePath) != nil {
+			fmt.Fprintf(os.Stderr, "Error creating blob object: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Println(h)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
@@ -214,7 +222,7 @@ func main() {
 	}
 }
 
-func pathFromHash(hash string) (dirName, objName string) {
+func decomposeHash(hash string) (dirName, fileName string) {
 	return hash[:2], hash[2:]
 }
 
@@ -227,7 +235,7 @@ func createTempObjFile() *os.File {
 	return tmpf
 }
 
-func returnFile(filename string) (*os.File, fs.FileInfo) {
+func openFile(filename string) (*os.File, fs.FileInfo) {
 	info, err := os.Stat(filename)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching file info: %v\n", err)
@@ -242,23 +250,29 @@ func returnFile(filename string) (*os.File, fs.FileInfo) {
 	return df, info
 }
 
-func getBlobObjHeader(fsize int64) string {
-	return fmt.Sprintf("blob %d\x00", fsize)
+func writeGitObject(writer io.Writer, objType string, payloadSize int, payload io.Reader) {
+	header := fmt.Sprintf("%s %d\x00", objType, payloadSize)
+	if _, err := writer.Write([]byte(header)); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing object: %v\n", err)
+	}
+	if _, err := io.Copy(writer, payload); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing object: %v\n", err)
+	}
 }
 
-func generateTreeEntries(b []byte, nameonly bool) []string {
+func parseTreeObject(treeObject []byte, nameonly bool) []string {
 	var out []string
 	for {
-		spaceIdx := bytes.IndexByte(b, ' ')
-		delimIdx := bytes.IndexByte(b, '\x00')
+		spaceIdx := bytes.IndexByte(treeObject, ' ')
+		delimIdx := bytes.IndexByte(treeObject, '\x00')
 
 		if spaceIdx == -1 || delimIdx == -1 {
-			fmt.Fprintf(os.Stderr, "Unexpected absence of delim tokens")
+			fmt.Fprintf(os.Stderr, "Unexpected absence of delim byte")
 		}
 
-		modei := string(b[:spaceIdx])
-		namei := string(b[spaceIdx+1 : delimIdx])
-		hashi := hex.EncodeToString(b[delimIdx+1 : delimIdx+21])
+		modei := string(treeObject[:spaceIdx])
+		namei := string(treeObject[spaceIdx+1 : delimIdx])
+		hashi := hex.EncodeToString(treeObject[delimIdx+1 : delimIdx+21])
 
 		if len(modei) == 5 {
 			modei = "0" + modei
@@ -270,70 +284,131 @@ func generateTreeEntries(b []byte, nameonly bool) []string {
 			out = append(out, fmt.Sprintf("%s %s %s", modei, hashi, namei))
 		}
 
-		if len(b[delimIdx+1:]) == 20 {
+		if len(treeObject[delimIdx+1:]) == 20 {
 			break
 		}
 
-		b = b[delimIdx+21:]
+		treeObject = treeObject[delimIdx+21:]
 	}
 	return out
 }
 
-func generateTreeObject(path string, d fs.DirEntry, treeEntries []string) (string, error) {
-	if d.IsDir() && path != "." {
-		return "", fs.SkipDir
-	} else if !d.IsDir() {
-		// For files, we need to create the blob, same as we have done in the past.
-		tmpf := createTempObjFile()
-		os.Remove(tmpf.Name())
+type GitTreeEntry struct {
+	Name string
+	Mode string
+	Hash []byte
+}
 
-		df, dfinfo := returnFile(d.Name())
+func (e GitTreeEntry) String() string {
+	return fmt.Sprintf("%s %s\x00%s", e.Mode, e.Name, e.Hash)
+}
 
-		header := getBlobObjHeader(dfinfo.Size())
-
-		hash := sha1.New()
-		zw := zlib.NewWriter(tmpf)
-		mw := io.MultiWriter(hash, zw)
-
-		mw.Write([]byte(header))
-		_, err := io.Copy(mw, df)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error hashing/compressing object: %v\n", err)
-			os.Exit(1)
+// TODO: maybe use goroutines here for performance.
+func generateTreePayload(cwd []fs.DirEntry, currentPath string) *bytes.Buffer {
+	var entries []GitTreeEntry
+	for _, e := range cwd {
+		if e.Name() == ".git" {
+			continue
 		}
-		hsum := hash.Sum(nil)
-		//		h := hex.EncodeToString(hsum)
-		zw.Close()
-		tmpf.Close()
+		if e.IsDir() {
+			tmpf := createTempObjFile()
+			defer os.Remove(tmpf.Name())
 
-		////	objDirName, objFileName := pathFromHash(h)
-		////	err = os.Mkdir(fp.Join(gitObjDir, objDirName), 0775)
-		////	if err != nil && !errors.Is(err, fs.ErrExist) {
-		////		fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
-		////		os.Exit(1)
-		////	}
+			sd, err := os.ReadDir(fp.Join(currentPath, e.Name()))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error walking current working directory: %v\n", err)
+			}
 
-		////	objFilePath := fp.Join(gitObjDir, objDirName, objFileName)
-		////	if os.Rename(tmpf.Name(), objFilePath) != nil {
-		////		fmt.Fprintf(os.Stderr, "Error creating blob object: %v\n", err)
-		////		os.Exit(1)
-		////	}
+			sdTreeBody := generateTreePayload(sd, fp.Join(currentPath, e.Name()))
 
-		info, err := d.Info()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing tree: %v\n", err)
-			os.Exit(1)
+			hash := sha1.New()
+			zw := zlib.NewWriter(tmpf)
+			mw := io.MultiWriter(hash, zw)
+
+			writeGitObject(mw, "tree", sdTreeBody.Len(), sdTreeBody)
+			tmpf.Close()
+			zw.Close()
+
+			hsum := hash.Sum(nil)
+
+			//    objDirName, objFileName := pathFromHash(h)
+			//    err = os.Mkdir(fp.Join(gitObjDir, objDirName), 0775)
+			//    if err != nil && !errors.Is(err, fs.ErrExist) {
+			//    	fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
+			//    	os.Exit(1)
+			//    }
+
+			//    objFilePath := fp.Join(gitObjDir, objDirName, objFileName)
+			//    os.Rename(tmpf.Name(), objFilePath)
+
+			entry := GitTreeEntry{
+				Mode: gitDirMode,
+				Name: e.Name(),
+				Hash: hsum,
+			}
+			entries = append(entries, entry)
+
+		} else if !e.IsDir() {
+			tmpf := createTempObjFile()
+			defer os.Remove(tmpf.Name())
+
+			f, finfo := openFile(fp.Join(currentPath, e.Name()))
+
+			hash := sha1.New()
+			zw := zlib.NewWriter(tmpf)
+			mw := io.MultiWriter(hash, zw)
+
+			writeGitObject(mw, "blob", int(finfo.Size()), f)
+			hsum := hash.Sum(nil)
+			zw.Close()
+			tmpf.Close()
+
+			////	objDirName, objFileName := pathFromHash(h)
+			////	err = os.Mkdir(fp.Join(gitObjDir, objDirName), 0775)
+			////	if err != nil && !errors.Is(err, fs.ErrExist) {
+			////		fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
+			////		os.Exit(1)
+			////	}
+
+			////	objFilePath := fp.Join(gitObjDir, objDirName, objFileName)
+			////	if os.Rename(tmpf.Name(), objFilePath) != nil {
+			////		fmt.Fprintf(os.Stderr, "Error creating blob object: %v\n", err)
+			////		os.Exit(1)
+			////	}
+
+			fmode := finfo.Mode().Perm()
+			var mode string
+			if fmode&gitExModeOct != 0 {
+				mode = gitExMode
+			} else {
+				mode = gitRegMode
+			}
+
+			treeEntry := GitTreeEntry{
+				Mode: mode,
+				Name: e.Name(),
+				Hash: hsum,
+			}
+			entries = append(entries, treeEntry)
 		}
-
-		dmode := info.Mode().Perm()
-		var gitMode string
-		if dmode&xmode == 0 {
-			gitMode = "100644"
-		} else {
-			gitMode = "100755"
-		}
-
-		return fmt.Sprintf("%s %s\x00%s", gitMode, d.Name(), hsum), nil
 	}
-	return "", nil
+
+	slices.SortFunc(entries, func(a, b GitTreeEntry) int {
+		aName := a.Name
+		bName := b.Name
+		if a.Mode == gitDirMode {
+			aName += "/"
+		}
+		if b.Mode == gitDirMode {
+			bName += "/"
+		}
+		return strings.Compare(aName, bName)
+	})
+
+	var treeBody string
+	for _, entry := range entries {
+		treeBody += entry.String()
+	}
+
+	return bytes.NewBuffer([]byte(treeBody))
 }
