@@ -14,6 +14,7 @@ import (
 	fp "path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 const (
@@ -101,7 +102,7 @@ func main() {
 		hash := sha1.New()
 		zw := zlib.NewWriter(tmpw)
 		mw := io.MultiWriter(hash, zw)
-        writeGitObject(mw, "blob", int(finfo.Size()), f)
+		writeGitObject(mw, "blob", int(finfo.Size()), f)
 
 		h := fmt.Sprintf("%x", hash.Sum(nil))
 		zw.Close()
@@ -120,7 +121,7 @@ func main() {
 		tmpf.Close()
 
 		objDirName, objFileName := decomposeHash(h)
-        err := os.Mkdir(fp.Join(gitObjDir, objDirName), 0775)
+		err := os.MkdirAll(fp.Join(gitObjDir, objDirName), 0775)
 		if err != nil && !errors.Is(err, fs.ErrExist) {
 			fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
 			os.Exit(1)
@@ -202,7 +203,7 @@ func main() {
 		h := hex.EncodeToString(hash.Sum(nil))
 
 		objDirName, objFileName := decomposeHash(h)
-		err = os.Mkdir(fp.Join(gitObjDir, objDirName), 0775)
+		err = os.MkdirAll(fp.Join(gitObjDir, objDirName), 0775)
 		if err != nil && !errors.Is(err, fs.ErrExist) {
 			fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
 			os.Exit(1)
@@ -211,6 +212,45 @@ func main() {
 		objFilePath := fp.Join(gitObjDir, objDirName, objFileName)
 		if os.Rename(tmpf.Name(), objFilePath) != nil {
 			fmt.Fprintf(os.Stderr, "Error creating blob object: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Println(h)
+
+	case "commit-tree":
+		treesha := os.Args[2]
+		commitsha := os.Args[4]
+		message := os.Args[6]
+		author := "Teenus Lorvalds"
+		email := "teenus@lorvalds.com"
+
+		tmpf := createTempObjFile()
+		defer tmpf.Close()
+
+		t := time.Now()
+		timestamp := t.Unix()
+		_, offset := t.Zone()
+
+		payload := fmt.Sprintf("tree %s\nparent %s\nauthor %s <%s> %d %s\n\n%s", treesha, commitsha, author, email, timestamp, offset, message)
+		b := bytes.NewBuffer([]byte(payload))
+
+		hash := sha1.New()
+		zw := zlib.NewWriter(tmpf)
+		mw := io.MultiWriter(hash, zw)
+
+		writeGitObject(mw, "commit", b.Len(), b)
+		zw.Close()
+		tmpf.Close()
+
+		h := hex.EncodeToString(hash.Sum(nil))
+		objDirName, objFileName := decomposeHash(h)
+		if err := os.MkdirAll(fp.Join(gitObjDir, objDirName), 0775); err != nil && !errors.Is(err, fs.ErrExist) {
+			fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
+			os.Exit(1)
+		}
+		objFilePath := fp.Join(gitObjDir, objDirName, objFileName)
+		if err := os.Rename(tmpf.Name(), objFilePath); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating commit object: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -332,7 +372,7 @@ func generateTreePayload(cwd []fs.DirEntry, currentPath string) *bytes.Buffer {
 			hsum := hash.Sum(nil)
 
 			//    objDirName, objFileName := pathFromHash(h)
-			//    err = os.Mkdir(fp.Join(gitObjDir, objDirName), 0775)
+			//    err = os.MkdirAll(fp.Join(gitObjDir, objDirName), 0775)
 			//    if err != nil && !errors.Is(err, fs.ErrExist) {
 			//    	fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
 			//    	os.Exit(1)
@@ -364,7 +404,7 @@ func generateTreePayload(cwd []fs.DirEntry, currentPath string) *bytes.Buffer {
 			tmpf.Close()
 
 			////	objDirName, objFileName := pathFromHash(h)
-			////	err = os.Mkdir(fp.Join(gitObjDir, objDirName), 0775)
+			////	err = os.MkdirAll(fp.Join(gitObjDir, objDirName), 0775)
 			////	if err != nil && !errors.Is(err, fs.ErrExist) {
 			////		fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
 			////		os.Exit(1)
