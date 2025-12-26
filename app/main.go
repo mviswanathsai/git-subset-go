@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"crypto/sha1"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -24,6 +25,9 @@ const (
 	gitDirMode     = "40000"
 	gitRegMode     = "100644"
 	gitExMode      = "100755"
+	OBJ_COMMIT     = 1
+	OBJ_TREE       = 2
+	OBJ_BLOB       = 3
 )
 
 // Usage: your_program.sh <command> <arg1> <arg2> ...
@@ -260,9 +264,87 @@ func main() {
 
 		fmt.Println(h)
 
+	case "parse-packfile":
+		pfPath := os.Args[2]
+		// Open the file instead for comparison
+		pf, err := os.Open(pfPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error opening pack file: %v", err)
+			os.Exit(1)
+		}
+
+		br := bufio.NewReader(pf)
+
+		ver := make([]byte, 4)
+		nObj := make([]byte, 4)
+
+		// Discard the first 4 bytes
+		br.Discard(4)
+		// Read the version and the nobjects
+		io.ReadFull(br, ver)
+		io.ReadFull(br, nObj)
+		var i int
+		i++
+		divider := "----------"
+		for {
+			fmt.Printf("%sBEGIN OBJECT-%d%s\n\n", divider, i, divider)
+			// Read the subsequent bits until the MSB is 0
+			objType, objSize := readObjHeader(br)
+			fmt.Printf("The size of the object-%d: %d\n", i, objSize)
+			fmt.Printf("The type of the object-%d: %d\n", i, objType)
+
+			zr, _ := zlib.NewReader(br)
+			_, err = io.Copy(os.Stdout, zr)
+			if err != nil {
+				fmt.Printf("An error occurred while decompressing: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("\n")
+
+			fmt.Printf("%sEND OBJECT-%d%s\n\n", divider, i, divider)
+
+			if uint32(i) == binary.BigEndian.Uint32(nObj) {
+				break
+			}
+			i++
+		}
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
+	}
+}
+
+func readObjHeader(br *bufio.Reader) (byte, uint64) {
+	var i int
+	var objSize uint64
+	var objType byte
+	for {
+		b, _ := br.ReadByte()
+		if i == 0 {
+			objSize = uint64(b & 0b00001111)
+			objType = (b & 0b01110000) >> 4
+		} else {
+			objSize = uint64(b&0b01111111)<<(4+(i-1)*7) | uint64(objSize)
+		}
+		if b&0b10000000>>7 == 0 {
+			break
+		}
+		i++
+	}
+	return objType, objSize
+}
+
+func objectType(input byte) string {
+	switch input {
+	case OBJ_COMMIT:
+		return "commit"
+	case OBJ_TREE:
+		return "tree"
+	case OBJ_BLOB:
+		return "blob"
+	default:
+		return ""
 	}
 }
 
