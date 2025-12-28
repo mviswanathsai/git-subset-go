@@ -9,6 +9,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	files "github.com/codecrafters-io/git-starter-go/internal/files"
+	git "github.com/codecrafters-io/git-starter-go/internal/git"
+	hashes "github.com/codecrafters-io/git-starter-go/internal/hashes"
 	"io"
 	"io/fs"
 	"os"
@@ -16,28 +19,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-)
-
-const (
-	gitObjDir           = ".git/objects"
-	objheaderdelim      = 0
-	gitExModeOct        = fs.FileMode(0111)
-	gitDirMode          = "40000"
-	gitRegMode          = "100644"
-	gitExMode           = "100755"
-	OBJ_COMMIT          = 1
-	OBJ_TREE            = 2
-	OBJ_BLOB            = 3
-	OBJ_TAG             = 4
-	OBJ_OFS_DELTA       = 6
-	OBJ_REF_DELTA       = 7
-	CopyOffsetFlagsMask = 0b00001111
-	CopySizeFlagsMask   = 0b01110000
-	CopySizeFlagsLen    = 3
-	CopyOffsetFlagsLen  = 4
-	CopySizeFlagsShift  = 4
-	CopySizeZero        = 0x10000
-	InsertSizeMask      = 0b01111111
 )
 
 // Usage: your_program.sh <command> <arg1> <arg2> ...
@@ -68,7 +49,7 @@ func main() {
 		blobname := objhash[2:]
 
 		// we first need to open the file
-		filename := fp.Join(gitObjDir, blobdir, blobname)
+		filename := fp.Join(git.GitObjDir, blobdir, blobname)
 		f, err := os.Open(filename)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error opening file: %v\n", err)
@@ -83,7 +64,7 @@ func main() {
 		defer zr.Close()
 
 		r := bufio.NewReader(zr)
-		r.ReadBytes(objheaderdelim)
+		r.ReadBytes(git.ObjHeaderDelim)
 		io.Copy(os.Stdout, r)
 
 	case "hash-object":
@@ -102,47 +83,8 @@ func main() {
 			}
 		}
 
-		var tmpw io.Writer
-		if write {
-			tmpf := createTempObjFile()
-			defer os.Remove(tmpf.Name())
-			tmpw = tmpf
-		} else {
-			tmpw = io.Discard
-		}
-
-		f, finfo := openFile(filename)
-
-		hash := sha1.New()
-		zw := zlib.NewWriter(tmpw)
-		mw := io.MultiWriter(hash, zw)
-		writeGitObject(mw, "blob", int(finfo.Size()), f)
-
-		h := fmt.Sprintf("%x", hash.Sum(nil))
-		zw.Close()
-
-		if !write {
-			// Print the hex encoding of the hash.
-			fmt.Println(h)
-			return
-		}
-
-		tmpf, ok := tmpw.(*os.File)
-		if !ok {
-			fmt.Fprintf(os.Stderr, "Fatal: tmpw is of unexpected type %T", tmpw)
-			os.Exit(1)
-		}
-		tmpf.Close()
-
-		objDirName, objFileName := decomposeHash(h)
-		err := os.MkdirAll(fp.Join(gitObjDir, objDirName), 0775)
-		if err != nil && !errors.Is(err, fs.ErrExist) {
-			fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
-			os.Exit(1)
-		}
-
-		objFilePath := fp.Join(gitObjDir, objDirName, objFileName)
-		os.Rename(tmpf.Name(), objFilePath)
+		f, finfo := files.OpenFile(filename)
+		h := hashes.HashObject(f, finfo.Size(), "blob", write)
 
 		// Print the hex encoding of the hash.
 		fmt.Print(h)
@@ -162,8 +104,8 @@ func main() {
 		}
 
 		// given a hash, read the file and output
-		objDirName, objFileName := decomposeHash(treeh)
-		filepath := fp.Join(gitObjDir, objDirName, objFileName)
+		objDirName, objFileName := hashes.DecomposeHash(treeh)
+		filepath := fp.Join(git.GitObjDir, objDirName, objFileName)
 		f, err := os.Open(filepath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error opening file: %v\n", err)
@@ -204,26 +146,26 @@ func main() {
 
 		tree := generateTreePayload(cwd, ".")
 
-		tmpf := createTempObjFile()
+		tmpf := files.CreateTempObjFile()
 		defer os.Remove(tmpf.Name())
 
 		hash := sha1.New()
 		zw := zlib.NewWriter(tmpf)
 		mw := io.MultiWriter(hash, zw)
 
-		writeGitObject(mw, "tree", tree.Len(), tree)
+		files.WriteGitObject(mw, "tree", tree.Len(), tree)
 		zw.Close()
 		tmpf.Close()
 		h := hex.EncodeToString(hash.Sum(nil))
 
-		objDirName, objFileName := decomposeHash(h)
-		err = os.MkdirAll(fp.Join(gitObjDir, objDirName), 0775)
+		objDirName, objFileName := hashes.DecomposeHash(h)
+		err = os.MkdirAll(fp.Join(git.GitObjDir, objDirName), 0775)
 		if err != nil && !errors.Is(err, fs.ErrExist) {
 			fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
 			os.Exit(1)
 		}
 
-		objFilePath := fp.Join(gitObjDir, objDirName, objFileName)
+		objFilePath := fp.Join(git.GitObjDir, objDirName, objFileName)
 		if os.Rename(tmpf.Name(), objFilePath) != nil {
 			fmt.Fprintf(os.Stderr, "Error creating blob object: %v\n", err)
 			os.Exit(1)
@@ -238,7 +180,7 @@ func main() {
 		author := "Teenus Lorvalds"
 		email := "teenus@lorvalds.com"
 
-		tmpf := createTempObjFile()
+		tmpf := files.CreateTempObjFile()
 		defer tmpf.Close()
 
 		t := time.Now()
@@ -256,17 +198,17 @@ func main() {
 		zw := zlib.NewWriter(tmpf)
 		mw := io.MultiWriter(hash, zw)
 
-		writeGitObject(mw, "commit", b.Len(), b)
+		files.WriteGitObject(mw, "commit", b.Len(), b)
 		zw.Close()
 		tmpf.Close()
 
 		h := hex.EncodeToString(hash.Sum(nil))
-		objDirName, objFileName := decomposeHash(h)
-		if err := os.MkdirAll(fp.Join(gitObjDir, objDirName), 0775); err != nil && !errors.Is(err, fs.ErrExist) {
+		objDirName, objFileName := hashes.DecomposeHash(h)
+		if err := os.MkdirAll(fp.Join(git.GitObjDir, objDirName), 0775); err != nil && !errors.Is(err, fs.ErrExist) {
 			fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
 			os.Exit(1)
 		}
-		objFilePath := fp.Join(gitObjDir, objDirName, objFileName)
+		objFilePath := fp.Join(git.GitObjDir, objDirName, objFileName)
 		if err := os.Rename(tmpf.Name(), objFilePath); err != nil {
 			fmt.Fprintf(os.Stderr, "Error creating commit object: %v\n", err)
 			os.Exit(1)
@@ -294,22 +236,30 @@ func main() {
 		io.ReadFull(br, ver)
 		io.ReadFull(br, nObj)
 		divider := "----------"
+		packIndex := make(map[int64]indexEntry)
+		// TODO: let's hash the data
 		for i := 1; ; i++ {
 			if uint32(i) > binary.BigEndian.Uint32(nObj) {
 				fmt.Printf("Total number of objects is %d\n", binary.BigEndian.Uint32(nObj))
 				break
 			}
 
+			dstWriter := os.Stdout
+			headerOfs := currentOffset(pf, br)
 			objType, objSize := readObjHeader(br)
+			dataOfs := currentOffset(pf, br)
 
-            dstWriter := os.Stdout
+			packIndex[headerOfs] = newIndexEntry(objType, objSize, uint8(dataOfs-headerOfs))
 
 			fmt.Fprintf(dstWriter, "%sBEGIN OBJECT-%d%s\n\n", divider, i, divider)
-            if objType == 6 {
-                // The required negative offet from the type byte
-                negOfs := readDeltaNegOfs(br)
-                fmt.Fprintf(dstWriter, "The negative offset for ofs_delta_%d: %d\n", i, negOfs)
-            }
+			fmt.Fprintf(dstWriter, "The header offset: %d\n", headerOfs)
+			fmt.Fprintf(dstWriter, "The data offset: %d\n", dataOfs)
+			if objType == 6 {
+				// The required negative offet from the type byte
+				negOfs := readDeltaNegOfs(br)
+				fmt.Fprintf(dstWriter, "The negative offset for ofs_delta_%d: %d\n", i, negOfs)
+				fmt.Fprintf(dstWriter, "The parent offset for ofs_delta_%d: %d\n", i, uint64(headerOfs)-negOfs)
+			}
 			fmt.Fprintf(dstWriter, "The size of the object-%d: %d\n", i, objSize)
 			fmt.Fprintf(dstWriter, "The type of the object-%d: %s\n", i, objectType(objType))
 
@@ -318,11 +268,13 @@ func main() {
 				var buf bytes.Buffer
 				parseDeltaObj(&buf, zr, dstWriter)
 			} else {
-				_, err = io.Copy(dstWriter, zr)
-				if err != nil {
-					fmt.Fprintf(dstWriter, "An error occurred while decompressing: %v\n", err)
-					os.Exit(1)
-				}
+				h := hashes.HashObject(zr, int64(objSize), objectType(objType), false)
+				////	_, err = io.Copy(dstWriter, zr)
+				////	if err != nil {
+				////		fmt.Fprintf(dstWriter, "An error occurred while decompressing: %v\n", err)
+				////		os.Exit(1)
+				////	}
+				fmt.Fprintf(dstWriter, "The hash of the objects: %s", h)
 				fmt.Fprintf(dstWriter, "\n")
 			}
 
@@ -335,14 +287,55 @@ func main() {
 	}
 }
 
-// Copy instruction: offset in the source buffer and the length of data to copy to the destination buffer
-// Insert instruction: number of bytes to copy from delta buffer into the target - bytes that are not part of the source buffer
-// There seem to be 3 buffers: source, destination and delta
+func currentOffset(f *os.File, br *bufio.Reader) int64 {
+	fofs, _ := f.Seek(0, 1)
+	currOfs := fofs - int64(br.Buffered())
 
-// The delta object header contains the length of the source and the target buffers: 2 VLQ's in the header
-// Then directly the payload with copy/insert instructions
-type DeltaObject struct {
-	instructions []string
+	return currOfs
+}
+
+type indexEntry struct {
+	objType    uint8
+	objSize    uint64
+	dataOffset uint8 // The offset from the headerOfs to find the data, can be a maximum of 64 bits -> 8 bytes -> can be stored in uint8
+}
+
+type deltaObj struct {
+	headerOfs  int64
+	srcBufSize uint64
+	dstBufSize uint64
+	negOfs     int64
+	ops        []DeltaOps
+}
+
+type DeltaOps interface {
+	kind() byte
+}
+
+type OpCodeCopy struct {
+	offset uint64
+	size   uint64
+}
+
+func (OpCodeCopy) Kind() byte {
+	return 1
+}
+
+type OpCodeInsert struct {
+	payloadSize uint8
+	payload     []byte
+}
+
+func (OpCodeInsert) Kind() byte {
+	return 0
+}
+
+func newIndexEntry(objType uint8, objSize uint64, dataOffset uint8) indexEntry {
+	return indexEntry{
+		objType:    objType,
+		objSize:    objSize,
+		dataOffset: dataOffset,
+	}
 }
 
 func parseDeltaObj(buf *bytes.Buffer, zr io.ReadCloser, dstWriter io.Writer) {
@@ -357,8 +350,8 @@ func parseDeltaObj(buf *bytes.Buffer, zr io.ReadCloser, dstWriter io.Writer) {
 		b, _ := (buf).ReadByte()
 		if b&0x80 != 0 {
 			fmt.Fprintf(dstWriter, "Copy instruction\n")
-			copyOfsFlags := (b & CopyOffsetFlagsMask)
-			copySizeFlags := (b & CopySizeFlagsMask) >> CopySizeFlagsShift
+			copyOfsFlags := (b & git.CopyOffsetFlagsMask)
+			copySizeFlags := (b & git.CopySizeFlagsMask) >> git.CopySizeFlagsShift
 			ofs := readDeltaCopyOffset(copyOfsFlags, buf)
 			size := readDeltaCopySize(copySizeFlags, buf)
 			fmt.Fprintf(dstWriter, "The copy header byte is: %b\n", b)
@@ -368,7 +361,7 @@ func parseDeltaObj(buf *bytes.Buffer, zr io.ReadCloser, dstWriter io.Writer) {
 			// We need to reconstruct deltified objects recursively
 		} else {
 			fmt.Fprintf(dstWriter, "Insert instruction\n")
-			insertSize := (b & InsertSizeMask)
+			insertSize := (b & git.InsertSizeMask)
 			fmt.Fprintf(dstWriter, "The insert header byte is: %b\n", b)
 			fmt.Fprintf(dstWriter, "The insert size is: %d\n", insertSize)
 			insertPayloadBuf := make([]byte, insertSize)
@@ -424,7 +417,7 @@ func readDeltaSize(buf *bytes.Buffer) uint64 {
 }
 
 func readDeltaCopyOffset(ofsFlags byte, br *bytes.Buffer) (ofs uint64) {
-	for i := 0; i < CopyOffsetFlagsLen; i++ {
+	for i := 0; i < git.CopyOffsetFlagsLen; i++ {
 		if (0b00000001 & (ofsFlags >> i)) == 1 {
 			b, _ := br.ReadByte()
 			ofs |= uint64(b) << (8 * i)
@@ -434,14 +427,14 @@ func readDeltaCopyOffset(ofsFlags byte, br *bytes.Buffer) (ofs uint64) {
 }
 
 func readDeltaCopySize(sizeFlags byte, br *bytes.Buffer) (size uint64) {
-	for i := 0; i < CopySizeFlagsLen; i++ {
+	for i := 0; i < git.CopySizeFlagsLen; i++ {
 		if (0b00000001 & (sizeFlags >> i)) == 1 {
 			b, _ := br.ReadByte()
 			size |= uint64(b) << (8 * i)
 		}
 	}
 	if size == 0 {
-		return CopySizeZero
+		return git.CopySizeZero
 	}
 	return size
 }
@@ -467,58 +460,20 @@ func readDeltaNegOfs(br *bufio.Reader) uint64 {
 
 func objectType(input byte) string {
 	switch input {
-	case OBJ_COMMIT:
-		return "commit"
-	case OBJ_TREE:
-		return "tree"
-	case OBJ_BLOB:
-		return "blob"
-	case OBJ_TAG:
-		return "tag"
-	case OBJ_OFS_DELTA:
-		return "ofs_delta"
-	case OBJ_REF_DELTA:
-		return "ref_delta"
+	case git.OBJ_COMMIT:
+		return git.GIT_COMMIT
+	case git.OBJ_TREE:
+		return git.GIT_TREE
+	case git.OBJ_BLOB:
+		return git.GIT_BLOB
+	case git.OBJ_TAG:
+		return git.GIT_TAG
+	case git.OBJ_OFS_DELTA:
+		return git.GIT_OFS_DELTA
+	case git.OBJ_REF_DELTA:
+		return git.GIT_REF_DELTA
 	default:
 		return ""
-	}
-}
-
-func decomposeHash(hash string) (dirName, fileName string) {
-	return hash[:2], hash[2:]
-}
-
-func createTempObjFile() *os.File {
-	tmpf, err := os.CreateTemp(gitObjDir, "tmp_obj_")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating temp file: %v\n", err)
-		os.Exit(1)
-	}
-	return tmpf
-}
-
-func openFile(filename string) (*os.File, fs.FileInfo) {
-	info, err := os.Stat(filename)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error fetching file info: %v\n", err)
-		os.Exit(1)
-	}
-
-	df, err := os.Open(filename)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
-		os.Exit(1)
-	}
-	return df, info
-}
-
-func writeGitObject(writer io.Writer, objType string, payloadSize int, payload io.Reader) {
-	header := fmt.Sprintf("%s %d\x00", objType, payloadSize)
-	if _, err := writer.Write([]byte(header)); err != nil {
-		fmt.Fprintf(os.Stderr, "Error writing object: %v\n", err)
-	}
-	if _, err := io.Copy(writer, payload); err != nil {
-		fmt.Fprintf(os.Stderr, "Error writing object: %v\n", err)
 	}
 }
 
@@ -573,7 +528,7 @@ func generateTreePayload(cwd []fs.DirEntry, currentPath string) *bytes.Buffer {
 			continue
 		}
 		if e.IsDir() {
-			tmpf := createTempObjFile()
+			tmpf := files.CreateTempObjFile()
 			defer os.Remove(tmpf.Name())
 
 			sd, err := os.ReadDir(fp.Join(currentPath, e.Name()))
@@ -587,52 +542,52 @@ func generateTreePayload(cwd []fs.DirEntry, currentPath string) *bytes.Buffer {
 			zw := zlib.NewWriter(tmpf)
 			mw := io.MultiWriter(hash, zw)
 
-			writeGitObject(mw, "tree", sdTreeBody.Len(), sdTreeBody)
+			files.WriteGitObject(mw, "tree", sdTreeBody.Len(), sdTreeBody)
 			tmpf.Close()
 			zw.Close()
 
 			hsum := hash.Sum(nil)
 
 			//    objDirName, objFileName := pathFromHash(h)
-			//    err = os.MkdirAll(fp.Join(gitObjDir, objDirName), 0775)
+			//    err = os.MkdirAll(fp.Join(git.GitObjDir, objDirName), 0775)
 			//    if err != nil && !errors.Is(err, fs.ErrExist) {
 			//    	fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
 			//    	os.Exit(1)
 			//    }
 
-			//    objFilePath := fp.Join(gitObjDir, objDirName, objFileName)
+			//    objFilePath := fp.Join(git.GitObjDir, objDirName, objFileName)
 			//    os.Rename(tmpf.Name(), objFilePath)
 
 			entry := GitTreeEntry{
-				Mode: gitDirMode,
+				Mode: git.GitDirMode,
 				Name: e.Name(),
 				Hash: hsum,
 			}
 			entries = append(entries, entry)
 
 		} else if !e.IsDir() {
-			tmpf := createTempObjFile()
+			tmpf := files.CreateTempObjFile()
 			defer os.Remove(tmpf.Name())
 
-			f, finfo := openFile(fp.Join(currentPath, e.Name()))
+			f, finfo := files.OpenFile(fp.Join(currentPath, e.Name()))
 
 			hash := sha1.New()
 			zw := zlib.NewWriter(tmpf)
 			mw := io.MultiWriter(hash, zw)
 
-			writeGitObject(mw, "blob", int(finfo.Size()), f)
+			files.WriteGitObject(mw, "blob", int(finfo.Size()), f)
 			hsum := hash.Sum(nil)
 			zw.Close()
 			tmpf.Close()
 
 			////	objDirName, objFileName := pathFromHash(h)
-			////	err = os.MkdirAll(fp.Join(gitObjDir, objDirName), 0775)
+			////	err = os.MkdirAll(fp.Join(git.GitObjDir, objDirName), 0775)
 			////	if err != nil && !errors.Is(err, fs.ErrExist) {
 			////		fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
 			////		os.Exit(1)
 			////	}
 
-			////	objFilePath := fp.Join(gitObjDir, objDirName, objFileName)
+			////	objFilePath := fp.Join(git.GitObjDir, objDirName, objFileName)
 			////	if os.Rename(tmpf.Name(), objFilePath) != nil {
 			////		fmt.Fprintf(os.Stderr, "Error creating blob object: %v\n", err)
 			////		os.Exit(1)
@@ -640,10 +595,10 @@ func generateTreePayload(cwd []fs.DirEntry, currentPath string) *bytes.Buffer {
 
 			fmode := finfo.Mode().Perm()
 			var mode string
-			if fmode&gitExModeOct != 0 {
-				mode = gitExMode
+			if fmode&git.GitExModeOct != 0 {
+				mode = git.GitExMode
 			} else {
-				mode = gitRegMode
+				mode = git.GitRegMode
 			}
 
 			treeEntry := GitTreeEntry{
@@ -658,10 +613,10 @@ func generateTreePayload(cwd []fs.DirEntry, currentPath string) *bytes.Buffer {
 	slices.SortFunc(entries, func(a, b GitTreeEntry) int {
 		aName := a.Name
 		bName := b.Name
-		if a.Mode == gitDirMode {
+		if a.Mode == git.GitDirMode {
 			aName += "/"
 		}
-		if b.Mode == gitDirMode {
+		if b.Mode == git.GitDirMode {
 			bName += "/"
 		}
 		return strings.Compare(aName, bName)
