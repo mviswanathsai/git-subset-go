@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math/bits"
 	"os"
 	fp "path/filepath"
 	"slices"
@@ -28,6 +29,9 @@ const (
 	OBJ_COMMIT     = 1
 	OBJ_TREE       = 2
 	OBJ_BLOB       = 3
+	OBJ_TAG        = 4
+	OBJ_OFS_DELTA  = 6
+	OBJ_REF_DELTA  = 7
 )
 
 // Usage: your_program.sh <command> <arg1> <arg2> ...
@@ -283,36 +287,79 @@ func main() {
 		// Read the version and the nobjects
 		io.ReadFull(br, ver)
 		io.ReadFull(br, nObj)
-		var i int
-		i++
 		divider := "----------"
-		for {
-			fmt.Printf("%sBEGIN OBJECT-%d%s\n\n", divider, i, divider)
-			// Read the subsequent bits until the MSB is 0
-			objType, objSize := readObjHeader(br)
-			fmt.Printf("The size of the object-%d: %d\n", i, objSize)
-			fmt.Printf("The type of the object-%d: %d\n", i, objType)
-
-			zr, _ := zlib.NewReader(br)
-			_, err = io.Copy(os.Stdout, zr)
-			if err != nil {
-				fmt.Printf("An error occurred while decompressing: %v\n", err)
-				os.Exit(1)
-			}
-			fmt.Printf("\n")
-
-			fmt.Printf("%sEND OBJECT-%d%s\n\n", divider, i, divider)
-
-			if uint32(i) == binary.BigEndian.Uint32(nObj) {
+		for i := 1; ; i++ {
+			if uint32(i) > binary.BigEndian.Uint32(nObj) {
+				fmt.Printf("Total number of objects is %d\n", binary.BigEndian.Uint32(nObj))
 				break
 			}
-			i++
+
+			objType, objSize := readObjHeader(br)
+
+			if objType == 6 {
+				// The required negative offet from the type byte
+				negOfs := readDeltaOfs(br)
+				fmt.Printf("The negative offset for ofs_delta_%d: %d\n", i, negOfs)
+			}
+
+			var dstWriter io.Writer
+			if objType == 6 {
+				dstWriter = os.Stdout
+			} else {
+				dstWriter = io.Discard
+			}
+
+			fmt.Fprintf(dstWriter, "%sBEGIN OBJECT-%d%s\n\n", divider, i, divider)
+			fmt.Fprintf(dstWriter, "The size of the object-%d: %d\n", i, objSize)
+			fmt.Fprintf(dstWriter, "The type of the object-%d: %s\n", i, objectType(objType))
+
+			zr, _ := zlib.NewReader(br)
+			if objType == 6 {
+				var buf bytes.Buffer
+				// mw := io.MultiWriter(dstWriter, &buf)
+				_, err = io.Copy(&buf, zr)
+				srcSize, dstSize := readDeltaHeader(&buf)
+				fmt.Fprintf(dstWriter, "\n")
+				fmt.Fprintf(dstWriter, "The src buffer size:%d\nThe dst buffer size:%d\n", srcSize, dstSize)
+				b, _ := (&buf).ReadByte()
+				if b&0x80 != 0 {
+					fmt.Fprintf(dstWriter, "Copy instruction\n")
+					ofs := bits.Reverse8(((b & 0b01111000) >> 3))
+					size := bits.Reverse8(b & 0b00000111)
+					fmt.Fprintf(dstWriter, "The byte is: %b\n", b)
+					fmt.Fprintf(dstWriter, "Size of copy instruction: %d\nOffset of copy instruction:%d\n", size, ofs)
+                    // We need to reconstruct deltified objects recursively
+				} else {
+					fmt.Fprintf(dstWriter, "Insert instruction\n")
+				}
+				_, err = io.Copy(dstWriter, &buf)
+				fmt.Fprintf(dstWriter, "\n")
+			} else {
+				_, err = io.Copy(dstWriter, zr)
+				if err != nil {
+					fmt.Fprintf(dstWriter, "An error occurred while decompressing: %v\n", err)
+					os.Exit(1)
+				}
+				fmt.Fprintf(dstWriter, "\n")
+			}
+
+			fmt.Fprintf(dstWriter, "%sEND OBJECT-%d%s\n\n", divider, i, divider)
 		}
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
 	}
+}
+
+// Copy instruction: offset in the source buffer and the length of data to copy to the destination buffer
+// Insert instruction: number of bytes to copy from delta buffer into the target - bytes that are not part of the source buffer
+// There seem to be 3 buffers: source, destination and delta
+
+// The delta object header contains the length of the source and the target buffers: 2 VLQ's in the header
+// Then directly the payload with copy/insert instructions
+type DeltaObject struct {
+	instructions []string
 }
 
 func readObjHeader(br *bufio.Reader) (byte, uint64) {
@@ -335,6 +382,47 @@ func readObjHeader(br *bufio.Reader) (byte, uint64) {
 	return objType, objSize
 }
 
+// There are two sizes to read
+func readDeltaHeader(buf *bytes.Buffer) (srcSize uint64, dstSize uint64) {
+	srcSize = readDeltaSize(buf)
+	dstSize = readDeltaSize(buf)
+	return srcSize, dstSize
+}
+
+func readDeltaSize(buf *bytes.Buffer) uint64 {
+	var i uint64
+	var size uint64
+	i++
+	for {
+		b, _ := buf.ReadByte()
+		size = uint64(b&0b01111111)<<((i-1)*7) | size
+		if b&0x80 == 0 {
+			break
+		}
+		i++
+	}
+	return size
+}
+
+func readDeltaOfs(br *bufio.Reader) uint64 {
+	var i uint64
+	var size uint64
+
+	for {
+		if i != 0 {
+			// The +1 rule
+			size++
+		}
+		b, _ := br.ReadByte()
+		size = size<<7 | uint64(b&0b01111111)
+		if b&0x80 == 0 {
+			break
+		}
+		i++
+	}
+	return size
+}
+
 func objectType(input byte) string {
 	switch input {
 	case OBJ_COMMIT:
@@ -343,6 +431,12 @@ func objectType(input byte) string {
 		return "tree"
 	case OBJ_BLOB:
 		return "blob"
+	case OBJ_TAG:
+		return "tag"
+	case OBJ_OFS_DELTA:
+		return "ofs_delta"
+	case OBJ_REF_DELTA:
+		return "ref_delta"
 	default:
 		return ""
 	}
