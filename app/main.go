@@ -235,9 +235,7 @@ func main() {
 		// Read the version and the nobjects
 		io.ReadFull(br, ver)
 		io.ReadFull(br, nObj)
-		divider := "----------"
 		packIndex := make(map[int64]indexEntry)
-		// TODO: let's hash the data
 		for i := 1; ; i++ {
 			if uint32(i) > binary.BigEndian.Uint32(nObj) {
 				fmt.Printf("Total number of objects is %d\n", binary.BigEndian.Uint32(nObj))
@@ -251,17 +249,12 @@ func main() {
 
 			packIndex[headerOfs] = newIndexEntry(objType, objSize, uint8(dataOfs-headerOfs))
 
-			fmt.Fprintf(dstWriter, "%sBEGIN OBJECT-%d%s\n\n", divider, i, divider)
-			fmt.Fprintf(dstWriter, "The header offset: %d\n", headerOfs)
-			fmt.Fprintf(dstWriter, "The data offset: %d\n", dataOfs)
 			if objType == 6 {
 				// The required negative offet from the type byte
 				negOfs := readDeltaNegOfs(br)
-				fmt.Fprintf(dstWriter, "The negative offset for ofs_delta_%d: %d\n", i, negOfs)
+				//fmt.Fprintf(dstWriter, "The negative offset for ofs_delta_%d: %d\n", i, negOfs)
 				fmt.Fprintf(dstWriter, "The parent offset for ofs_delta_%d: %d\n", i, uint64(headerOfs)-negOfs)
 			}
-			fmt.Fprintf(dstWriter, "The size of the object-%d: %d\n", i, objSize)
-			fmt.Fprintf(dstWriter, "The type of the object-%d: %s\n", i, objectType(objType))
 
 			zr, _ := zlib.NewReader(br)
 			if objType == 6 {
@@ -269,16 +262,8 @@ func main() {
 				parseDeltaObj(&buf, zr, dstWriter)
 			} else {
 				h := hashes.HashObject(zr, int64(objSize), objectType(objType), false)
-				////	_, err = io.Copy(dstWriter, zr)
-				////	if err != nil {
-				////		fmt.Fprintf(dstWriter, "An error occurred while decompressing: %v\n", err)
-				////		os.Exit(1)
-				////	}
-				fmt.Fprintf(dstWriter, "The hash of the objects: %s", h)
-				fmt.Fprintf(dstWriter, "\n")
+				fmt.Fprintf(dstWriter, "%s %s %d %d\n", h, objectType(objType), objSize, headerOfs)
 			}
-
-			fmt.Fprintf(dstWriter, "%sEND OBJECT-%d%s\n\n", divider, i, divider)
 		}
 
 	default:
