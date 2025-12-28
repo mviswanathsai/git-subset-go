@@ -216,7 +216,7 @@ func main() {
 
 		fmt.Println(h)
 
-	case "parse-packfile":
+	case "verify-pack":
 		pfPath := os.Args[2]
 		// Open the file instead for comparison
 		pf, err := os.Open(pfPath)
