@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"math/bits"
 	"os"
 	fp "path/filepath"
 	"slices"
@@ -20,18 +19,25 @@ import (
 )
 
 const (
-	gitObjDir      = ".git/objects"
-	objheaderdelim = 0
-	gitExModeOct   = fs.FileMode(0111)
-	gitDirMode     = "40000"
-	gitRegMode     = "100644"
-	gitExMode      = "100755"
-	OBJ_COMMIT     = 1
-	OBJ_TREE       = 2
-	OBJ_BLOB       = 3
-	OBJ_TAG        = 4
-	OBJ_OFS_DELTA  = 6
-	OBJ_REF_DELTA  = 7
+	gitObjDir           = ".git/objects"
+	objheaderdelim      = 0
+	gitExModeOct        = fs.FileMode(0111)
+	gitDirMode          = "40000"
+	gitRegMode          = "100644"
+	gitExMode           = "100755"
+	OBJ_COMMIT          = 1
+	OBJ_TREE            = 2
+	OBJ_BLOB            = 3
+	OBJ_TAG             = 4
+	OBJ_OFS_DELTA       = 6
+	OBJ_REF_DELTA       = 7
+	CopyOffsetFlagsMask = 0b00001111
+	CopySizeFlagsMask   = 0b01110000
+	CopySizeFlagsLen    = 3
+	CopyOffsetFlagsLen  = 4
+	CopySizeFlagsShift  = 4
+	CopySizeZero        = 0x10000
+	InsertSizeMask      = 0b01111111
 )
 
 // Usage: your_program.sh <command> <arg1> <arg2> ...
@@ -296,44 +302,21 @@ func main() {
 
 			objType, objSize := readObjHeader(br)
 
-			if objType == 6 {
-				// The required negative offet from the type byte
-				negOfs := readDeltaOfs(br)
-				fmt.Printf("The negative offset for ofs_delta_%d: %d\n", i, negOfs)
-			}
-
-			var dstWriter io.Writer
-			if objType == 6 {
-				dstWriter = os.Stdout
-			} else {
-				dstWriter = io.Discard
-			}
+            dstWriter := os.Stdout
 
 			fmt.Fprintf(dstWriter, "%sBEGIN OBJECT-%d%s\n\n", divider, i, divider)
+            if objType == 6 {
+                // The required negative offet from the type byte
+                negOfs := readDeltaNegOfs(br)
+                fmt.Fprintf(dstWriter, "The negative offset for ofs_delta_%d: %d\n", i, negOfs)
+            }
 			fmt.Fprintf(dstWriter, "The size of the object-%d: %d\n", i, objSize)
 			fmt.Fprintf(dstWriter, "The type of the object-%d: %s\n", i, objectType(objType))
 
 			zr, _ := zlib.NewReader(br)
 			if objType == 6 {
 				var buf bytes.Buffer
-				// mw := io.MultiWriter(dstWriter, &buf)
-				_, err = io.Copy(&buf, zr)
-				srcSize, dstSize := readDeltaHeader(&buf)
-				fmt.Fprintf(dstWriter, "\n")
-				fmt.Fprintf(dstWriter, "The src buffer size:%d\nThe dst buffer size:%d\n", srcSize, dstSize)
-				b, _ := (&buf).ReadByte()
-				if b&0x80 != 0 {
-					fmt.Fprintf(dstWriter, "Copy instruction\n")
-					ofs := bits.Reverse8(((b & 0b01111000) >> 3))
-					size := bits.Reverse8(b & 0b00000111)
-					fmt.Fprintf(dstWriter, "The byte is: %b\n", b)
-					fmt.Fprintf(dstWriter, "Size of copy instruction: %d\nOffset of copy instruction:%d\n", size, ofs)
-                    // We need to reconstruct deltified objects recursively
-				} else {
-					fmt.Fprintf(dstWriter, "Insert instruction\n")
-				}
-				_, err = io.Copy(dstWriter, &buf)
-				fmt.Fprintf(dstWriter, "\n")
+				parseDeltaObj(&buf, zr, dstWriter)
 			} else {
 				_, err = io.Copy(dstWriter, zr)
 				if err != nil {
@@ -360,6 +343,42 @@ func main() {
 // Then directly the payload with copy/insert instructions
 type DeltaObject struct {
 	instructions []string
+}
+
+func parseDeltaObj(buf *bytes.Buffer, zr io.ReadCloser, dstWriter io.Writer) {
+	// mw := io.MultiWriter(dstWriter, &buf)
+	io.Copy(buf, zr)
+	srcSize, dstSize := readDeltaHeader(buf)
+	fmt.Fprintf(dstWriter, "\n")
+	fmt.Fprintf(dstWriter, "src buffer size:%d\ndst buffer size:%d\n", srcSize, dstSize)
+	fmt.Fprintf(dstWriter, "\n")
+
+	for buf.Len() != 0 {
+		b, _ := (buf).ReadByte()
+		if b&0x80 != 0 {
+			fmt.Fprintf(dstWriter, "Copy instruction\n")
+			copyOfsFlags := (b & CopyOffsetFlagsMask)
+			copySizeFlags := (b & CopySizeFlagsMask) >> CopySizeFlagsShift
+			ofs := readDeltaCopyOffset(copyOfsFlags, buf)
+			size := readDeltaCopySize(copySizeFlags, buf)
+			fmt.Fprintf(dstWriter, "The copy header byte is: %b\n", b)
+			fmt.Fprintf(dstWriter, "The copy size is: %d\n", size)
+			fmt.Fprintf(dstWriter, "The copy offset is: %d\n", ofs)
+			fmt.Fprintf(dstWriter, "\n")
+			// We need to reconstruct deltified objects recursively
+		} else {
+			fmt.Fprintf(dstWriter, "Insert instruction\n")
+			insertSize := (b & InsertSizeMask)
+			fmt.Fprintf(dstWriter, "The insert header byte is: %b\n", b)
+			fmt.Fprintf(dstWriter, "The insert size is: %d\n", insertSize)
+			insertPayloadBuf := make([]byte, insertSize)
+			io.ReadFull(buf, insertPayloadBuf)
+			fmt.Fprintf(dstWriter, "The insert payload is: %s\n", insertPayloadBuf)
+			fmt.Fprintf(dstWriter, "\n")
+		}
+	}
+	io.Copy(dstWriter, buf)
+	fmt.Fprintf(dstWriter, "\n")
 }
 
 func readObjHeader(br *bufio.Reader) (byte, uint64) {
@@ -404,7 +423,30 @@ func readDeltaSize(buf *bytes.Buffer) uint64 {
 	return size
 }
 
-func readDeltaOfs(br *bufio.Reader) uint64 {
+func readDeltaCopyOffset(ofsFlags byte, br *bytes.Buffer) (ofs uint64) {
+	for i := 0; i < CopyOffsetFlagsLen; i++ {
+		if (0b00000001 & (ofsFlags >> i)) == 1 {
+			b, _ := br.ReadByte()
+			ofs |= uint64(b) << (8 * i)
+		}
+	}
+	return ofs
+}
+
+func readDeltaCopySize(sizeFlags byte, br *bytes.Buffer) (size uint64) {
+	for i := 0; i < CopySizeFlagsLen; i++ {
+		if (0b00000001 & (sizeFlags >> i)) == 1 {
+			b, _ := br.ReadByte()
+			size |= uint64(b) << (8 * i)
+		}
+	}
+	if size == 0 {
+		return CopySizeZero
+	}
+	return size
+}
+
+func readDeltaNegOfs(br *bufio.Reader) uint64 {
 	var i uint64
 	var size uint64
 
