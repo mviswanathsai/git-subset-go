@@ -289,15 +289,16 @@ func main() {
 			br:          br,
 			file:        pf,
 		}
-		for _, node := range packIndex {
+
+		for _, offset := range packOrder {
+			node := packIndex[offset]
 			if node.Type() < 6 {
+				fmt.Print(node.String())
 				continue
 			}
 			builder.buildDeltaObject(node)
-		}
+			fmt.Print(node.String())
 
-		for _, offset := range packOrder {
-			fmt.Print(packIndex[offset].String())
 		}
 
 		fmt.Fprintf(os.Stdout, "The size of the index is %d", len(packIndex))
