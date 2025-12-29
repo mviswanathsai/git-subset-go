@@ -430,54 +430,53 @@ type ResolvedObject struct {
 	Data       []byte
 }
 
-// TODO: implement caching
+func (builder *objectBuilder) resolveDelta(n *deltaNode) *ResolvedObject {
+	parentResolvedObject := builder.buildObject(builder.Index()[n.ParentOffset()])
+	depth := parentResolvedObject.Depth + 1
+	baseType := parentResolvedObject.Type
+	data := applyDelta(n, parentResolvedObject.Data)
+	hash := hashes.ReturnObjectSHA(data, int64(len(data)), objectType(baseType))
+	res := &ResolvedObject{
+		SHA1:       hash,
+		Depth:      depth,
+		ParentSHA1: parentResolvedObject.SHA1,
+		Type:       baseType,
+		Data:       data,
+	}
+	return res
+}
+
+func (builder *objectBuilder) resolveBase(n *objectNode) *ResolvedObject {
+	data := builder.readObjectData(n)
+	hash := hashes.ReturnObjectSHA(data, int64(n.objSize), objectType(n.objType))
+	objType := n.Type()
+	depth := 0
+	res := &ResolvedObject{
+		SHA1:       hash,
+		Depth:      depth,
+		ParentSHA1: "",
+		Type:       objType,
+		Data:       data,
+	}
+	return res
+}
+
 func (builder *objectBuilder) buildObject(n packNode) *ResolvedObject {
 	if cached, ok := builder.lookupCache[n.Offset()]; ok {
 		return cached
 	}
 
-	var out *ResolvedObject
+	var res *ResolvedObject
 
-	if n.Type() != 6 {
-		// Read the actual data and return it
-		objNode, ok := n.(*objectNode)
-		if !ok {
-			fmt.Fprintf(os.Stderr, "Something is seriously wrong\n")
-			os.Exit(1)
-		}
-		data := builder.readObjectData(objNode)
-		hash := hashes.ReturnObjectSHA(data, int64(objNode.objSize), objectType(objNode.objType))
-		objType := n.Type()
-		depth := 0
-		out = &ResolvedObject{
-			SHA1:       hash,
-			Depth:      depth,
-			ParentSHA1: "",
-			Type:       objType,
-			Data:       data,
-		}
-		builder.lookupCache[n.Offset()] = out
-	} else {
-		d, ok := n.(*deltaNode)
-		if !ok || n.ParentOffset() <= 0 {
-			fmt.Fprintf(os.Stderr, "Something is very wrong")
-			os.Exit(1)
-		}
-		parentResolvedObject := builder.buildObject(builder.Index()[n.ParentOffset()])
-		depth := parentResolvedObject.Depth + 1
-		baseType := parentResolvedObject.Type
-		data := applyDelta(d, parentResolvedObject.Data)
-		hash := hashes.ReturnObjectSHA(data, int64(len(data)), objectType(baseType))
-		out = &ResolvedObject{
-			SHA1:       hash,
-			Depth:      depth,
-			ParentSHA1: parentResolvedObject.SHA1,
-			Type:       baseType,
-			Data:       data,
-		}
-		builder.lookupCache[n.Offset()] = out
+	switch Type := n.Type(); Type {
+	case 6:
+		res = builder.resolveDelta(n.(*deltaNode))
+	default:
+		res = builder.resolveBase(n.(*objectNode))
 	}
-	return out
+	builder.lookupCache[n.Offset()] = res
+
+	return res
 }
 
 func (builder *objectBuilder) readObjectData(n *objectNode) []byte {
