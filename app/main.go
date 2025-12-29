@@ -245,7 +245,6 @@ func main() {
 		packOrder := make([]uint64, 0)
 
 		for i := 1; uint32(i) <= binary.BigEndian.Uint32(nObj); i++ {
-			dstWriter := os.Stdout
 			headerOfs := currentOffset(pf, br)
 			objType, objSize := readObjHeader(br)
 			packOrder = append(packOrder, headerOfs)
@@ -261,7 +260,7 @@ func main() {
 			zr, _ := zlib.NewReader(br)
 			if objType == 6 {
 				var buf bytes.Buffer
-				srcBufSize, dstBufSize, ops := parseDeltaObj(&buf, zr, dstWriter)
+				srcBufSize, dstBufSize, ops := parseDeltaObj(&buf, zr)
 				packIndex[headerOfs] = &deltaNode{
 					srcBufSize: srcBufSize,
 					dstBufSize: dstBufSize,
@@ -486,7 +485,7 @@ func (InsertOp) kind() byte {
 	return OP_COPE_INSERT
 }
 
-func parseDeltaObj(buf *bytes.Buffer, zr io.ReadCloser, dstWriter io.Writer) (srcBufSize, dstBufSize uint64, ops []DeltaOps) {
+func parseDeltaObj(buf *bytes.Buffer, zr io.ReadCloser) (srcBufSize, dstBufSize uint64, ops []DeltaOps) {
 	// mw := io.MultiWriter(dstWriter, &buf)
 	io.Copy(buf, zr)
 	srcSize, dstSize := readDeltaHeader(buf)
