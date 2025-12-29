@@ -240,8 +240,10 @@ func main() {
 		// Read the version and the nobjects
 		io.ReadFull(br, ver)
 		io.ReadFull(br, nObj)
+
 		packIndex := make(map[uint64]packNode)
 		packOrder := make([]uint64, 0)
+
 		for i := 1; uint32(i) <= binary.BigEndian.Uint32(nObj); i++ {
 			dstWriter := os.Stdout
 			headerOfs := currentOffset(pf, br)
@@ -253,8 +255,6 @@ func main() {
 				// The required negative offet from the type byte
 				negOfs := readDeltaNegOfs(br)
 				parentOfs = uint64(headerOfs) - negOfs
-				//fmt.Fprintf(dstWriter, "The negative offset for ofs_delta_%d: %d\n", i, negOfs)
-				//fmt.Fprintf(dstWriter, "The parent offset for ofs_delta_%d: %d\n", i, uint64(headerOfs)-negOfs)
 			}
 
 			dataOfs := currentOffset(pf, br)
@@ -262,7 +262,6 @@ func main() {
 			if objType == 6 {
 				var buf bytes.Buffer
 				srcBufSize, dstBufSize, ops := parseDeltaObj(&buf, zr, dstWriter)
-				// The parents are always at a negative offset. Meaning, we must have alrady traversed the parents
 				packIndex[headerOfs] = &deltaNode{
 					srcBufSize: srcBufSize,
 					dstBufSize: dstBufSize,
