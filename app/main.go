@@ -278,11 +278,18 @@ func main() {
 			}
 		}
 
-		fileHash, _ := io.ReadAll(br)
+		// At this point, only 20 bytes should be left
+		var fileHash []byte
+		bytesLeft := uint64(fileInfo.Size()) - currentOffset(pf, br)
+		if bytesLeft == 20 {
+			fileHash, _ = io.ReadAll(br)
+		} else {
+			fmt.Fprintf(os.Stderr, "Expected 20 bytes unread, got %d bytes", bytesLeft)
+		}
 
 		builder := &objectBuilder{
 			packIndex:   packIndex,
-			lookupCache: make(map[uint64]CachedResult),
+			lookupCache: make(map[uint64]*ResolvedObject),
 			br:          br,
 			file:        pf,
 		}
@@ -383,7 +390,7 @@ func printResult(res ObjectResult) {
 
 type objectBuilder struct {
 	packIndex   map[uint64]packNode
-	lookupCache map[uint64]CachedResult
+	lookupCache map[uint64]*ResolvedObject
 	file        *os.File
 	br          *bufio.Reader
 }
@@ -393,29 +400,29 @@ func (builder *objectBuilder) Index() map[uint64]packNode {
 }
 
 func (builder *objectBuilder) resolveObject(n packNode, currHeaderOfs, nxtHeaderOfs uint64) ObjectResult {
-	_, sha, parentSHA, objType, depth := builder.buildObject(n)
+	resolvedObject := builder.buildObject(n)
 	return ObjectResult{
-		SHA1:       sha,
-		Type:       objectType(objType),
+		SHA1:       resolvedObject.SHA1,
+		Type:       objectType(resolvedObject.Type),
 		Size:       n.ObjectSize(),
 		PackSize:   nxtHeaderOfs - currHeaderOfs,
 		Offset:     currHeaderOfs,
-		ParentSHA1: parentSHA,
-		Depth:      depth,
+		ParentSHA1: resolvedObject.ParentSHA1,
+		Depth:      resolvedObject.Depth,
 	}
 }
 
 type ObjectResult struct {
 	SHA1       string
-	Type       string // "commit", "blob", etc.
-	Size       uint64 // Uncompressed size
-	PackSize   uint64 // Physical size (distance to next object)
+	Type       string
+	Size       uint64
+	PackSize   uint64
 	Offset     uint64
 	Depth      int
 	ParentSHA1 string
 }
 
-type CachedResult struct {
+type ResolvedObject struct {
 	SHA1       string
 	Type       uint8 // "commit", "blob", etc.
 	Depth      int
@@ -424,10 +431,12 @@ type CachedResult struct {
 }
 
 // TODO: implement caching
-func (builder *objectBuilder) buildObject(n packNode) (data []byte, hash, parentHash string, objType uint8, depth int) {
+func (builder *objectBuilder) buildObject(n packNode) *ResolvedObject {
 	if cached, ok := builder.lookupCache[n.Offset()]; ok {
-		return cached.Data, cached.SHA1, cached.ParentSHA1, cached.Type, cached.Depth
+		return cached
 	}
+
+	var out *ResolvedObject
 
 	if n.Type() != 6 {
 		// Read the actual data and return it
@@ -436,38 +445,39 @@ func (builder *objectBuilder) buildObject(n packNode) (data []byte, hash, parent
 			fmt.Fprintf(os.Stderr, "Something is seriously wrong\n")
 			os.Exit(1)
 		}
-		data = builder.readObjectData(objNode)
-		hash = hashes.ReturnObjectSHA(data, int64(objNode.objSize), objectType(objNode.objType))
-		objType = n.Type()
-		depth = 0
-		builder.lookupCache[n.Offset()] = CachedResult{
+		data := builder.readObjectData(objNode)
+		hash := hashes.ReturnObjectSHA(data, int64(objNode.objSize), objectType(objNode.objType))
+		objType := n.Type()
+		depth := 0
+		out = &ResolvedObject{
 			SHA1:       hash,
 			Depth:      depth,
-			ParentSHA1: parentHash,
+			ParentSHA1: "",
 			Type:       objType,
 			Data:       data,
 		}
+		builder.lookupCache[n.Offset()] = out
 	} else {
 		d, ok := n.(*deltaNode)
 		if !ok || n.ParentOffset() <= 0 {
 			fmt.Fprintf(os.Stderr, "Something is very wrong")
 			os.Exit(1)
 		}
-		base, h, _, baseType, baseDepth := builder.buildObject(builder.Index()[n.ParentOffset()])
-		depth = baseDepth + 1
-		parentHash = h
-		objType = baseType
-		data = applyDelta(d, base)
-		hash = hashes.ReturnObjectSHA(data, int64(len(data)), objectType(baseType))
-		builder.lookupCache[n.Offset()] = CachedResult{
+		parentResolvedObject := builder.buildObject(builder.Index()[n.ParentOffset()])
+		depth := parentResolvedObject.Depth + 1
+		baseType := parentResolvedObject.Type
+		data := applyDelta(d, parentResolvedObject.Data)
+		hash := hashes.ReturnObjectSHA(data, int64(len(data)), objectType(baseType))
+		out = &ResolvedObject{
 			SHA1:       hash,
 			Depth:      depth,
-			ParentSHA1: parentHash,
-			Type:       objType,
+			ParentSHA1: parentResolvedObject.SHA1,
+			Type:       baseType,
 			Data:       data,
 		}
+		builder.lookupCache[n.Offset()] = out
 	}
-	return data, hash, parentHash, objType, depth
+	return out
 }
 
 func (builder *objectBuilder) readObjectData(n *objectNode) []byte {
