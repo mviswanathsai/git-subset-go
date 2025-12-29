@@ -282,7 +282,7 @@ func main() {
 
 		builder := &objectBuilder{
 			packIndex:   packIndex,
-			lookupCache: make(map[uint64][]byte),
+			lookupCache: make(map[uint64]CachedResult),
 			br:          br,
 			file:        pf,
 		}
@@ -383,7 +383,7 @@ func printResult(res ObjectResult) {
 
 type objectBuilder struct {
 	packIndex   map[uint64]packNode
-	lookupCache map[uint64][]byte
+	lookupCache map[uint64]CachedResult
 	file        *os.File
 	br          *bufio.Reader
 }
@@ -415,8 +415,20 @@ type ObjectResult struct {
 	ParentSHA1 string
 }
 
+type CachedResult struct {
+	SHA1       string
+	Type       uint8 // "commit", "blob", etc.
+	Depth      int
+	ParentSHA1 string
+	Data       []byte
+}
+
 // TODO: implement caching
 func (builder *objectBuilder) buildObject(n packNode) (data []byte, hash, parentHash string, objType uint8, depth int) {
+	if cached, ok := builder.lookupCache[n.Offset()]; ok {
+		return cached.Data, cached.SHA1, cached.ParentSHA1, cached.Type, cached.Depth
+	}
+
 	if n.Type() != 6 {
 		// Read the actual data and return it
 		objNode, ok := n.(*objectNode)
@@ -428,6 +440,13 @@ func (builder *objectBuilder) buildObject(n packNode) (data []byte, hash, parent
 		hash = hashes.ReturnObjectSHA(data, int64(objNode.objSize), objectType(objNode.objType))
 		objType = n.Type()
 		depth = 0
+		builder.lookupCache[n.Offset()] = CachedResult{
+			SHA1:       hash,
+			Depth:      depth,
+			ParentSHA1: parentHash,
+			Type:       objType,
+			Data:       data,
+		}
 	} else {
 		d, ok := n.(*deltaNode)
 		if !ok || n.ParentOffset() <= 0 {
@@ -440,6 +459,13 @@ func (builder *objectBuilder) buildObject(n packNode) (data []byte, hash, parent
 		objType = baseType
 		data = applyDelta(d, base)
 		hash = hashes.ReturnObjectSHA(data, int64(len(data)), objectType(baseType))
+		builder.lookupCache[n.Offset()] = CachedResult{
+			SHA1:       hash,
+			Depth:      depth,
+			ParentSHA1: parentHash,
+			Type:       objType,
+			Data:       data,
+		}
 	}
 	return data, hash, parentHash, objType, depth
 }
@@ -498,6 +524,7 @@ type packNode interface {
 	Type() uint8
 	ParentOffset() uint64
 	ObjectSize() uint64
+	Offset() uint64
 }
 
 type objectNode struct {
@@ -513,6 +540,10 @@ func (n *objectNode) Type() uint8 {
 
 func (n *objectNode) ParentOffset() uint64 {
 	return 0
+}
+
+func (n *objectNode) Offset() uint64 {
+	return n.headerOfs
 }
 
 func (n *objectNode) ObjectSize() uint64 {
@@ -538,6 +569,10 @@ func (n *deltaNode) ParentOffset() uint64 {
 
 func (n *deltaNode) ObjectSize() uint64 {
 	return n.objSize
+}
+
+func (n *deltaNode) Offset() uint64 {
+	return n.headerOfs
 }
 
 type DeltaOps interface {
