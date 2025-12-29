@@ -276,6 +276,8 @@ func main() {
 			}
 		}
 
+		fileHash, _ := io.ReadAll(br)
+
 		builder := &objectBuilder{
 			packIndex:   packIndex,
 			lookupCache: make(map[uint64][]byte),
@@ -312,11 +314,29 @@ func main() {
 			}
 			fmt.Printf("chain length = %d: %d objects\n", depth, count)
 		}
+		if verifyPackTrailer(pf, fileInfo, fileHash) {
+			fmt.Printf("%s: ok\n", pfPath)
+		}
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
 	}
+}
+
+func verifyPackTrailer(f *os.File, fInfo os.FileInfo, fileHash []byte) bool {
+	f.Seek(0, 0)
+	h := sha1.New()
+	lr := io.LimitReader(f, fInfo.Size()-20)
+
+	data, _ := io.Copy(h, lr)
+	if data < 20 {
+		os.Exit(1)
+	}
+
+	actual := h.Sum(nil)
+
+	return bytes.Equal(fileHash, actual)
 }
 
 func printResult(res ObjectResult) {
