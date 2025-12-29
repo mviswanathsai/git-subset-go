@@ -301,8 +301,6 @@ func main() {
 
 		}
 
-		fmt.Fprintf(os.Stdout, "The size of the index is %d", len(packIndex))
-
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
@@ -354,10 +352,6 @@ func (builder *objectBuilder) buildObjectFromDelta(n packNode) (data []byte, has
 		parentHash = h
 		objType = baseType
 		data = applyDelta(d, base)
-		fmt.Printf("The base type: %s\nThe src buffer size: %t\nThe dst buffer size: %t\n",
-			objectType(baseType),
-			len(base) == int(d.srcBufSize),
-			len(data) == int(d.dstBufSize))
 		hash = hashes.HashObject(bytes.NewBuffer(data), int64(len(data)), objectType(baseType), false)
 	}
 	return data, hash, parentHash, objType
@@ -398,8 +392,6 @@ func applyDelta(d *deltaNode, srcBuf []byte) []byte {
 				fmt.Fprintf(os.Stderr, "Something is very wrong")
 				os.Exit(1)
 			}
-			// fmt.Printf("\nInserting the payload %s\n", string(insertOp.Payload))
-			// insert the given payload at the current cursor position
 			copy(dstBuf[cursor:], insertOp.Payload)
 			cursor += uint64(len(insertOp.Payload))
 		}
