@@ -224,11 +224,7 @@ func main() {
 	case "verify-pack":
 		pfPath := os.Args[2]
 		// Open the file instead for comparison
-		pf, err := os.Open(pfPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error opening pack file: %v", err)
-			os.Exit(1)
-		}
+		pf, fileInfo := files.OpenFile(pfPath)
 
 		br := bufio.NewReader(pf)
 
@@ -270,6 +266,7 @@ func main() {
 					headerOfs:  headerOfs,
 				}
 			} else {
+				io.Copy(io.Discard, zr)
 				packIndex[headerOfs] = &objectNode{
 					objType:    objType,
 					objSize:    objSize,
@@ -288,16 +285,45 @@ func main() {
 
 		for i, offset := range packOrder {
 			node := packIndex[offset]
-			if node.Type() < 6 {
-				continue
-			}
-			builder.buildDeltaObject(node, offset, packOrder[i+1])
 
+			var nxtOfs uint64
+			if i < len(packOrder)-1 {
+				nxtOfs = packOrder[i+1]
+			} else {
+				nxtOfs = uint64((fileInfo.Size()) - 20)
+			}
+
+			result := builder.resolveObject(node, offset, nxtOfs)
+			printResult(result)
 		}
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
+	}
+}
+
+func printResult(res ObjectResult) {
+	if res.Depth > 0 {
+		// Format: SHA1 TYPE SIZE PACKSIZE OFFSET DEPTH PARENT_SHA1
+		fmt.Printf("%s %-7s %d %d %d %d %s\n",
+			res.SHA1,
+			res.Type,
+			res.Size,
+			res.PackSize,
+			res.Offset,
+			res.Depth,
+			res.ParentSHA1,
+		)
+	} else {
+		// Format: SHA1 TYPE SIZE PACKSIZE OFFSET
+		fmt.Printf("%s %-7s %d %d %d\n",
+			res.SHA1,
+			res.Type,
+			res.Size,
+			res.PackSize,
+			res.Offset,
+		)
 	}
 }
 
@@ -312,16 +338,16 @@ func (builder *objectBuilder) Index() map[uint64]packNode {
 	return builder.packIndex
 }
 
-func (builder *objectBuilder) buildDeltaObject(n packNode, currHeaderOfs, nxtHeaderOfs uint64) ObjectResult {
-	data, sha, parentSHA, objType := builder.buildObjectFromDelta(n)
-	fmt.Printf("len(data) == n.ObjSize(): %t", uint64(len(data)) == n.ObjectSize())
+func (builder *objectBuilder) resolveObject(n packNode, currHeaderOfs, nxtHeaderOfs uint64) ObjectResult {
+	_, sha, parentSHA, objType, depth := builder.buildObject(n)
 	return ObjectResult{
 		SHA1:       sha,
 		Type:       objectType(objType),
 		Size:       n.ObjectSize(),
 		PackSize:   nxtHeaderOfs - currHeaderOfs,
 		Offset:     currHeaderOfs,
-        ParentSHA1: parentSHA,
+		ParentSHA1: parentSHA,
+		Depth:      depth,
 	}
 }
 
@@ -336,7 +362,7 @@ type ObjectResult struct {
 }
 
 // TODO: implement caching
-func (builder *objectBuilder) buildObjectFromDelta(n packNode) (data []byte, hash, parentHash string, objType uint8) {
+func (builder *objectBuilder) buildObject(n packNode) (data []byte, hash, parentHash string, objType uint8, depth int) {
 	if n.Type() != 6 {
 		// Read the actual data and return it
 		objNode, ok := n.(*objectNode)
@@ -347,19 +373,21 @@ func (builder *objectBuilder) buildObjectFromDelta(n packNode) (data []byte, has
 		data = builder.readObjectData(objNode)
 		hash = hashes.HashObject(bytes.NewBuffer(data), int64(objNode.objSize), objectType(objNode.objType), false)
 		objType = n.Type()
+		depth = 0
 	} else {
 		d, ok := n.(*deltaNode)
 		if !ok || n.ParentOffset() <= 0 {
 			fmt.Fprintf(os.Stderr, "Something is very wrong")
 			os.Exit(1)
 		}
-		base, h, _, baseType := builder.buildObjectFromDelta(builder.Index()[n.ParentOffset()])
+		base, h, _, baseType, baseDepth := builder.buildObject(builder.Index()[n.ParentOffset()])
+		depth = baseDepth + 1
 		parentHash = h
 		objType = baseType
 		data = applyDelta(d, base)
 		hash = hashes.HashObject(bytes.NewBuffer(data), int64(len(data)), objectType(baseType), false)
 	}
-	return data, hash, parentHash, objType
+	return data, hash, parentHash, objType, depth
 }
 
 func (builder *objectBuilder) readObjectData(n *objectNode) []byte {
