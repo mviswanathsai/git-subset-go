@@ -16,6 +16,8 @@ import (
 	"io/fs"
 	"os"
 	fp "path/filepath"
+	"runtime"
+	"runtime/pprof"
 	"slices"
 	"strings"
 	"time"
@@ -318,6 +320,22 @@ func main() {
 			fmt.Printf("%s: ok\n", pfPath)
 		}
 
+		memf, err := os.Create("mem.prof")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "could not create memory profile: %v\n", err)
+			os.Exit(1)
+		}
+		defer memf.Close()
+
+		// Run a GC to get a clean view of what is actually being HELD in memory
+		// vs what is just waiting to be cleaned up.
+		runtime.GC()
+
+		if err := pprof.WriteHeapProfile(memf); err != nil {
+			fmt.Fprintf(os.Stderr, "could not write memory profile: %v\n", err)
+			os.Exit(1)
+		}
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
@@ -407,7 +425,7 @@ func (builder *objectBuilder) buildObject(n packNode) (data []byte, hash, parent
 			os.Exit(1)
 		}
 		data = builder.readObjectData(objNode)
-		hash = hashes.HashObject(bytes.NewBuffer(data), int64(objNode.objSize), objectType(objNode.objType), false)
+		hash = hashes.ReturnObjectSHA(data, int64(objNode.objSize), objectType(objNode.objType))
 		objType = n.Type()
 		depth = 0
 	} else {
@@ -421,7 +439,7 @@ func (builder *objectBuilder) buildObject(n packNode) (data []byte, hash, parent
 		parentHash = h
 		objType = baseType
 		data = applyDelta(d, base)
-		hash = hashes.HashObject(bytes.NewBuffer(data), int64(len(data)), objectType(baseType), false)
+		hash = hashes.ReturnObjectSHA(data, int64(len(data)), objectType(baseType))
 	}
 	return data, hash, parentHash, objType, depth
 }

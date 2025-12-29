@@ -3,14 +3,17 @@ package hashes
 import (
 	"compress/zlib"
 	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	files "github.com/codecrafters-io/git-starter-go/internal/files"
-	git "github.com/codecrafters-io/git-starter-go/internal/git"
 	"io"
 	"io/fs"
 	"os"
 	fp "path/filepath"
+	"strconv"
+
+	files "github.com/codecrafters-io/git-starter-go/internal/files"
+	git "github.com/codecrafters-io/git-starter-go/internal/git"
 )
 
 func HashObject(f io.Reader, size int64, objType string, write bool) string {
@@ -56,4 +59,16 @@ func HashObject(f io.Reader, size int64, objType string, write bool) string {
 
 func DecomposeHash(hash string) (dirName, fileName string) {
 	return hash[:2], hash[2:]
+}
+
+func ReturnObjectSHA(data []byte, size int64, objType string) string {
+	sha := sha1.New()
+	sha.Write([]byte(objType))
+	sha.Write([]byte(" "))
+	sha.Write([]byte(strconv.FormatInt(int64(len(data)), 10)))
+	sha.Write([]byte{0})
+	sha.Write(data)
+
+	h := hex.EncodeToString(sha.Sum(nil))
+	return h
 }
