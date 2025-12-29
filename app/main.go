@@ -21,6 +21,11 @@ import (
 	"time"
 )
 
+const (
+	OP_CODE_COPY   = 1
+	OP_COPE_INSERT = 0
+)
+
 // Usage: your_program.sh <command> <arg1> <arg2> ...
 func main() {
 	if len(os.Args) < 2 {
@@ -235,36 +240,67 @@ func main() {
 		// Read the version and the nobjects
 		io.ReadFull(br, ver)
 		io.ReadFull(br, nObj)
-		packIndex := make(map[int64]indexEntry)
-		for i := 1; ; i++ {
-			if uint32(i) > binary.BigEndian.Uint32(nObj) {
-				fmt.Printf("Total number of objects is %d\n", binary.BigEndian.Uint32(nObj))
-				break
-			}
-
+		packIndex := make(map[uint64]packNode)
+		packOrder := make([]uint64, 0)
+		for i := 1; uint32(i) <= binary.BigEndian.Uint32(nObj); i++ {
 			dstWriter := os.Stdout
 			headerOfs := currentOffset(pf, br)
 			objType, objSize := readObjHeader(br)
-			dataOfs := currentOffset(pf, br)
+			packOrder = append(packOrder, headerOfs)
 
-			packIndex[headerOfs] = newIndexEntry(objType, objSize, uint8(dataOfs-headerOfs))
-
+			var parentOfs uint64
 			if objType == 6 {
 				// The required negative offet from the type byte
 				negOfs := readDeltaNegOfs(br)
+				parentOfs = uint64(headerOfs) - negOfs
 				//fmt.Fprintf(dstWriter, "The negative offset for ofs_delta_%d: %d\n", i, negOfs)
-				fmt.Fprintf(dstWriter, "The parent offset for ofs_delta_%d: %d\n", i, uint64(headerOfs)-negOfs)
+				//fmt.Fprintf(dstWriter, "The parent offset for ofs_delta_%d: %d\n", i, uint64(headerOfs)-negOfs)
 			}
 
+			dataOfs := currentOffset(pf, br)
 			zr, _ := zlib.NewReader(br)
 			if objType == 6 {
 				var buf bytes.Buffer
-				parseDeltaObj(&buf, zr, dstWriter)
+				srcBufSize, dstBufSize, ops := parseDeltaObj(&buf, zr, dstWriter)
+				// The parents are always at a negative offset. Meaning, we must have alrady traversed the parents
+				packIndex[headerOfs] = &deltaNode{
+					srcBufSize: srcBufSize,
+					dstBufSize: dstBufSize,
+					parentOfs:  parentOfs,
+					ops:        ops,
+					objSize:    objSize,
+					headerOfs:  headerOfs,
+				}
 			} else {
 				h := hashes.HashObject(zr, int64(objSize), objectType(objType), false)
-				fmt.Fprintf(dstWriter, "%s %s %d %d\n", h, objectType(objType), objSize, headerOfs)
+				packIndex[headerOfs] = &objectNode{
+					objHash:    h,
+					objType:    objType,
+					objSize:    objSize,
+					headerOfs:  headerOfs,
+					dataOffset: dataOfs,
+				}
 			}
 		}
+
+		builder := &objectBuilder{
+			packIndex:   packIndex,
+			lookupCache: make(map[uint64][]byte),
+			br:          br,
+			file:        pf,
+		}
+		for _, node := range packIndex {
+			if node.Type() < 6 {
+				continue
+			}
+			builder.buildDeltaObject(node)
+		}
+
+		for _, offset := range packOrder {
+			fmt.Print(packIndex[offset].String())
+		}
+
+		fmt.Fprintf(os.Stdout, "The size of the index is %d", len(packIndex))
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
@@ -272,91 +308,228 @@ func main() {
 	}
 }
 
-func currentOffset(f *os.File, br *bufio.Reader) int64 {
+type objectBuilder struct {
+	packIndex   map[uint64]packNode
+	lookupCache map[uint64][]byte
+	file        *os.File
+	br          *bufio.Reader
+}
+
+func (builder *objectBuilder) Index() map[uint64]packNode {
+	return builder.packIndex
+}
+
+func (builder *objectBuilder) buildDeltaObject(n packNode) {
+	d, ok := n.(*deltaNode)
+	if !ok || n.ParentOffset() <= 0 {
+		fmt.Fprintf(os.Stderr, "Something is very wrong")
+		os.Exit(1)
+	}
+	_, hash, parentHash, objType := builder.buildObjectFromDelta(n)
+	d.objHash = hash
+	d.parentHash = parentHash
+	d.objType = objType
+}
+
+// TODO: implement caching
+func (builder *objectBuilder) buildObjectFromDelta(n packNode) (data []byte, hash, parentHash string, objType uint8) {
+	if n.Type() != 6 {
+		// Read the actual data and return it
+		objNode, ok := n.(*objectNode)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "Something is seriously wrong\n")
+			os.Exit(1)
+		}
+		data = builder.readObjectData(objNode)
+		hash = hashes.HashObject(bytes.NewBuffer(data), int64(objNode.objSize), objectType(objNode.objType), false)
+		objType = n.Type()
+	} else {
+		d, ok := n.(*deltaNode)
+		if !ok || n.ParentOffset() <= 0 {
+			fmt.Fprintf(os.Stderr, "Something is very wrong")
+			os.Exit(1)
+		}
+		base, h, _, baseType := builder.buildObjectFromDelta(builder.Index()[n.ParentOffset()])
+		parentHash = h
+		objType = baseType
+		data = applyDelta(d, base)
+		fmt.Printf("The base type: %s\nThe src buffer size: %t\nThe dst buffer size: %t\n",
+			objectType(baseType),
+			len(base) == int(d.srcBufSize),
+			len(data) == int(d.dstBufSize))
+		hash = hashes.HashObject(bytes.NewBuffer(data), int64(len(data)), objectType(baseType), false)
+	}
+	return data, hash, parentHash, objType
+}
+
+func (builder *objectBuilder) readObjectData(n *objectNode) []byte {
+	f := builder.file
+	br := builder.br
+	f.Seek(int64(n.dataOffset), 0)
+	br.Reset(f)
+	zr, _ := zlib.NewReader(br)
+	buf := make([]byte, n.ObjSize())
+	io.ReadFull(zr, buf)
+	zr.Close()
+	return buf
+}
+
+func applyDelta(d *deltaNode, srcBuf []byte) []byte {
+	if len(srcBuf) != int(d.srcBufSize) {
+		fmt.Fprintf(os.Stderr, "Unexepected src buffer size")
+		os.Exit(1)
+	}
+	dstBuf := make([]byte, d.dstBufSize)
+	var cursor uint64
+	for _, op := range d.ops {
+		if op.kind() == 1 {
+			copyOp, ok := op.(CopyOp)
+			if !ok {
+				fmt.Fprintf(os.Stderr, "Something is very wrong")
+				os.Exit(1)
+			}
+			// Copy from the given offset into the dst buffer
+			copy(dstBuf[cursor:], srcBuf[copyOp.Offset:copyOp.Offset+copyOp.Size])
+			cursor += copyOp.Size
+		} else {
+			insertOp, ok := op.(InsertOp)
+			if !ok {
+				fmt.Fprintf(os.Stderr, "Something is very wrong")
+				os.Exit(1)
+			}
+			// fmt.Printf("\nInserting the payload %s\n", string(insertOp.Payload))
+			// insert the given payload at the current cursor position
+			copy(dstBuf[cursor:], insertOp.Payload)
+			cursor += uint64(len(insertOp.Payload))
+		}
+
+	}
+	return dstBuf
+}
+
+func currentOffset(f *os.File, br *bufio.Reader) uint64 {
 	fofs, _ := f.Seek(0, 1)
 	currOfs := fofs - int64(br.Buffered())
 
-	return currOfs
+	return uint64(currOfs)
 }
 
-type indexEntry struct {
+type packNode interface {
+	Type() uint8
+	ParentOffset() uint64
+	String() string
+}
+
+type objectNode struct {
+	objHash    string
 	objType    uint8
 	objSize    uint64
-	dataOffset uint8 // The offset from the headerOfs to find the data, can be a maximum of 64 bits -> 8 bytes -> can be stored in uint8
+	headerOfs  uint64
+	dataOffset uint64 // The offset from the headerOfs to find the data, can be a maximum of 64 bits -> 8 bytes -> can be stored in uint8
 }
 
-type deltaObj struct {
-	headerOfs  int64
+func (n *objectNode) Type() uint8 {
+	return n.objType
+}
+
+func (n *objectNode) ParentOffset() uint64 {
+	return 0
+}
+
+func (n *objectNode) ObjectSize() uint64 {
+	return n.objSize
+}
+
+func (n *objectNode) String() string {
+	return fmt.Sprintf("%s %s %d %d\n", n.objHash, objectType(n.objType), n.objSize, n.headerOfs)
+}
+
+type deltaNode struct {
+	objHash    string
+	objType    uint8
+	parentHash string
 	srcBufSize uint64
 	dstBufSize uint64
-	negOfs     int64
+	parentOfs  uint64
 	ops        []DeltaOps
+	objSize    uint64
+	headerOfs  uint64
+}
+
+func (n *deltaNode) Type() uint8 {
+	return git.OBJ_OFS_DELTA
+}
+
+func (n *deltaNode) ParentOffset() uint64 {
+	return n.parentOfs
+}
+
+func (n *objectNode) ObjSize() uint64 {
+	return n.objSize
+}
+
+func (n *deltaNode) String() string {
+	return fmt.Sprintf("%s %s %d %d\t%s\n", n.objHash, objectType(n.objType), n.objSize, n.headerOfs, n.parentHash)
 }
 
 type DeltaOps interface {
 	kind() byte
 }
 
-type OpCodeCopy struct {
-	offset uint64
-	size   uint64
+type CopyOp struct {
+	Offset uint64
+	Size   uint64
 }
 
-func (OpCodeCopy) Kind() byte {
-	return 1
+func (CopyOp) kind() byte {
+	return OP_CODE_COPY
 }
 
-type OpCodeInsert struct {
-	payloadSize uint8
-	payload     []byte
+type InsertOp struct {
+	PayloadSize uint8
+	Payload     []byte
 }
 
-func (OpCodeInsert) Kind() byte {
-	return 0
+func (InsertOp) kind() byte {
+	return OP_COPE_INSERT
 }
 
-func newIndexEntry(objType uint8, objSize uint64, dataOffset uint8) indexEntry {
-	return indexEntry{
-		objType:    objType,
-		objSize:    objSize,
-		dataOffset: dataOffset,
-	}
-}
-
-func parseDeltaObj(buf *bytes.Buffer, zr io.ReadCloser, dstWriter io.Writer) {
+func parseDeltaObj(buf *bytes.Buffer, zr io.ReadCloser, dstWriter io.Writer) (srcBufSize, dstBufSize uint64, ops []DeltaOps) {
 	// mw := io.MultiWriter(dstWriter, &buf)
 	io.Copy(buf, zr)
 	srcSize, dstSize := readDeltaHeader(buf)
-	fmt.Fprintf(dstWriter, "\n")
-	fmt.Fprintf(dstWriter, "src buffer size:%d\ndst buffer size:%d\n", srcSize, dstSize)
-	fmt.Fprintf(dstWriter, "\n")
+	////fmt.Fprintf(dstWriter, "\n")
+	////fmt.Fprintf(dstWriter, "src buffer size:%d\ndst buffer size:%d\n", srcSize, dstSize)
+	////fmt.Fprintf(dstWriter, "\n")
 
 	for buf.Len() != 0 {
 		b, _ := (buf).ReadByte()
 		if b&0x80 != 0 {
-			fmt.Fprintf(dstWriter, "Copy instruction\n")
+			//fmt.Fprintf(dstWriter, "Copy instruction\n")
 			copyOfsFlags := (b & git.CopyOffsetFlagsMask)
 			copySizeFlags := (b & git.CopySizeFlagsMask) >> git.CopySizeFlagsShift
 			ofs := readDeltaCopyOffset(copyOfsFlags, buf)
 			size := readDeltaCopySize(copySizeFlags, buf)
-			fmt.Fprintf(dstWriter, "The copy header byte is: %b\n", b)
-			fmt.Fprintf(dstWriter, "The copy size is: %d\n", size)
-			fmt.Fprintf(dstWriter, "The copy offset is: %d\n", ofs)
-			fmt.Fprintf(dstWriter, "\n")
-			// We need to reconstruct deltified objects recursively
+			////fmt.Fprintf(dstWriter, "The copy header byte is: %b\n", b)
+			////fmt.Fprintf(dstWriter, "The copy size is: %d\n", size)
+			////fmt.Fprintf(dstWriter, "The copy offset is: %d\n", ofs)
+			////fmt.Fprintf(dstWriter, "\n")
+			ops = append(ops, CopyOp{Offset: ofs, Size: size})
 		} else {
-			fmt.Fprintf(dstWriter, "Insert instruction\n")
-			insertSize := (b & git.InsertSizeMask)
-			fmt.Fprintf(dstWriter, "The insert header byte is: %b\n", b)
-			fmt.Fprintf(dstWriter, "The insert size is: %d\n", insertSize)
-			insertPayloadBuf := make([]byte, insertSize)
+			// fmt.Fprintf(dstWriter, "Insert instruction\n")
+			payloadSize := (b & git.InsertSizeMask)
+			//fmt.Fprintf(dstWriter, "The insert header byte is: %b\n", b)
+			// fmt.Fprintf(dstWriter, "The insert size is: %d\n", payloadSize)
+			insertPayloadBuf := make([]byte, payloadSize)
 			io.ReadFull(buf, insertPayloadBuf)
-			fmt.Fprintf(dstWriter, "The insert payload is: %s\n", insertPayloadBuf)
-			fmt.Fprintf(dstWriter, "\n")
+			////fmt.Fprintf(dstWriter, "The insert payload is: %s\n", insertPayloadBuf)
+			////fmt.Fprintf(dstWriter, "\n")
+			ops = append(ops, InsertOp{PayloadSize: payloadSize, Payload: insertPayloadBuf})
 		}
 	}
-	io.Copy(dstWriter, buf)
-	fmt.Fprintf(dstWriter, "\n")
+	//io.Copy(dstWriter, buf)
+	//fmt.Fprintf(dstWriter, "\n")
+	return srcSize, dstSize, ops
 }
 
 func readObjHeader(br *bufio.Reader) (byte, uint64) {
@@ -402,7 +575,7 @@ func readDeltaSize(buf *bytes.Buffer) uint64 {
 }
 
 func readDeltaCopyOffset(ofsFlags byte, br *bytes.Buffer) (ofs uint64) {
-	for i := 0; i < git.CopyOffsetFlagsLen; i++ {
+	for i := range git.CopyOffsetFlagsLen {
 		if (0b00000001 & (ofsFlags >> i)) == 1 {
 			b, _ := br.ReadByte()
 			ofs |= uint64(b) << (8 * i)
@@ -412,7 +585,7 @@ func readDeltaCopyOffset(ofsFlags byte, br *bytes.Buffer) (ofs uint64) {
 }
 
 func readDeltaCopySize(sizeFlags byte, br *bytes.Buffer) (size uint64) {
-	for i := 0; i < git.CopySizeFlagsLen; i++ {
+	for i := range git.CopySizeFlagsLen {
 		if (0b00000001 & (sizeFlags >> i)) == 1 {
 			b, _ := br.ReadByte()
 			size |= uint64(b) << (8 * i)
