@@ -270,9 +270,7 @@ func main() {
 					headerOfs:  headerOfs,
 				}
 			} else {
-				h := hashes.HashObject(zr, int64(objSize), objectType(objType), false)
 				packIndex[headerOfs] = &objectNode{
-					objHash:    h,
 					objType:    objType,
 					objSize:    objSize,
 					headerOfs:  headerOfs,
@@ -288,14 +286,12 @@ func main() {
 			file:        pf,
 		}
 
-		for _, offset := range packOrder {
+		for i, offset := range packOrder {
 			node := packIndex[offset]
 			if node.Type() < 6 {
-				fmt.Print(node.String())
 				continue
 			}
-			builder.buildDeltaObject(node)
-			fmt.Print(node.String())
+			builder.buildDeltaObject(node, offset, packOrder[i+1])
 
 		}
 
@@ -316,16 +312,27 @@ func (builder *objectBuilder) Index() map[uint64]packNode {
 	return builder.packIndex
 }
 
-func (builder *objectBuilder) buildDeltaObject(n packNode) {
-	d, ok := n.(*deltaNode)
-	if !ok || n.ParentOffset() <= 0 {
-		fmt.Fprintf(os.Stderr, "Something is very wrong")
-		os.Exit(1)
+func (builder *objectBuilder) buildDeltaObject(n packNode, currHeaderOfs, nxtHeaderOfs uint64) ObjectResult {
+	data, sha, parentSHA, objType := builder.buildObjectFromDelta(n)
+	fmt.Printf("len(data) == n.ObjSize(): %t", uint64(len(data)) == n.ObjectSize())
+	return ObjectResult{
+		SHA1:       sha,
+		Type:       objectType(objType),
+		Size:       n.ObjectSize(),
+		PackSize:   nxtHeaderOfs - currHeaderOfs,
+		Offset:     currHeaderOfs,
+        ParentSHA1: parentSHA,
 	}
-	_, hash, parentHash, objType := builder.buildObjectFromDelta(n)
-	d.objHash = hash
-	d.parentHash = parentHash
-	d.objType = objType
+}
+
+type ObjectResult struct {
+	SHA1       string
+	Type       string // "commit", "blob", etc.
+	Size       uint64 // Uncompressed size
+	PackSize   uint64 // Physical size (distance to next object)
+	Offset     uint64
+	Depth      int
+	ParentSHA1 string
 }
 
 // TODO: implement caching
@@ -361,7 +368,7 @@ func (builder *objectBuilder) readObjectData(n *objectNode) []byte {
 	f.Seek(int64(n.dataOffset), 0)
 	br.Reset(f)
 	zr, _ := zlib.NewReader(br)
-	buf := make([]byte, n.ObjSize())
+	buf := make([]byte, n.ObjectSize())
 	io.ReadFull(zr, buf)
 	zr.Close()
 	return buf
@@ -408,11 +415,10 @@ func currentOffset(f *os.File, br *bufio.Reader) uint64 {
 type packNode interface {
 	Type() uint8
 	ParentOffset() uint64
-	String() string
+	ObjectSize() uint64
 }
 
 type objectNode struct {
-	objHash    string
 	objType    uint8
 	objSize    uint64
 	headerOfs  uint64
@@ -431,14 +437,7 @@ func (n *objectNode) ObjectSize() uint64 {
 	return n.objSize
 }
 
-func (n *objectNode) String() string {
-	return fmt.Sprintf("%s %s %d %d\n", n.objHash, objectType(n.objType), n.objSize, n.headerOfs)
-}
-
 type deltaNode struct {
-	objHash    string
-	objType    uint8
-	parentHash string
 	srcBufSize uint64
 	dstBufSize uint64
 	parentOfs  uint64
@@ -455,12 +454,8 @@ func (n *deltaNode) ParentOffset() uint64 {
 	return n.parentOfs
 }
 
-func (n *objectNode) ObjSize() uint64 {
+func (n *deltaNode) ObjectSize() uint64 {
 	return n.objSize
-}
-
-func (n *deltaNode) String() string {
-	return fmt.Sprintf("%s %s %d %d\t%s\n", n.objHash, objectType(n.objType), n.objSize, n.headerOfs, n.parentHash)
 }
 
 type DeltaOps interface {
