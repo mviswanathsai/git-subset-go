@@ -283,6 +283,8 @@ func main() {
 			file:        pf,
 		}
 
+		nonDelta := 0
+		chainCounts := make(map[int]int) // Maps depth to count
 		for i, offset := range packOrder {
 			node := packIndex[offset]
 
@@ -294,7 +296,21 @@ func main() {
 			}
 
 			result := builder.resolveObject(node, offset, nxtOfs)
+			if result.Depth == 0 {
+				nonDelta++
+			} else {
+				chainCounts[result.Depth]++
+			}
 			printResult(result)
+		}
+		// Print the counts
+		fmt.Printf("non delta: %d objects\n", nonDelta)
+		for depth := 1; ; depth++ {
+			count, exists := chainCounts[depth]
+			if !exists {
+				break
+			}
+			fmt.Printf("chain length = %d: %d objects\n", depth, count)
 		}
 
 	default:
