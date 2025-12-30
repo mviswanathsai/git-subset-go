@@ -241,6 +241,7 @@ func main() {
 
 		packIndex := make(map[uint64]packNode)
 		packOrder := make([]uint64, 0)
+		var zr io.ReadCloser
 
 		for i := 1; uint32(i) <= binary.BigEndian.Uint32(nObj); i++ {
 			headerOfs := currentOffset(pf, br)
@@ -255,7 +256,12 @@ func main() {
 			}
 
 			dataOfs := currentOffset(pf, br)
-			zr, _ := zlib.NewReader(br)
+			if zr == nil {
+				zr, _ = zlib.NewReader(br)
+			} else {
+				zr.(zlib.Resetter).Reset(br, nil)
+			}
+
 			if objType == 6 {
 				var buf bytes.Buffer
 				srcBufSize, dstBufSize, ops := parseDeltaObj(&buf, zr)
@@ -393,6 +399,7 @@ type objectBuilder struct {
 	lookupCache map[uint64]*ResolvedObject
 	file        *os.File
 	br          *bufio.Reader
+	zr          io.ReadCloser
 }
 
 func (builder *objectBuilder) Index() map[uint64]packNode {
@@ -488,10 +495,15 @@ func (builder *objectBuilder) readObjectData(n *objectNode) []byte {
 	br := builder.br
 	f.Seek(int64(n.dataOffset), 0)
 	br.Reset(f)
-	zr, _ := zlib.NewReader(br)
+	if builder.zr == nil {
+		builder.zr, _ = zlib.NewReader(builder.br)
+	} else {
+		if reseter, ok := builder.zr.(zlib.Resetter); ok {
+			reseter.Reset(builder.br, nil)
+		}
+	}
 	buf := make([]byte, n.ObjectSize())
-	io.ReadFull(zr, buf)
-	zr.Close()
+	io.ReadFull(builder.zr, buf)
 	return buf
 }
 
