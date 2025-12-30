@@ -9,9 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	files "github.com/codecrafters-io/git-starter-go/internal/files"
-	git "github.com/codecrafters-io/git-starter-go/internal/git"
-	hashes "github.com/codecrafters-io/git-starter-go/internal/hashes"
+	"hash"
 	"io"
 	"io/fs"
 	"os"
@@ -19,8 +17,13 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+
+	files "github.com/codecrafters-io/git-starter-go/internal/files"
+	git "github.com/codecrafters-io/git-starter-go/internal/git"
+	hashes "github.com/codecrafters-io/git-starter-go/internal/hashes"
 )
 
 const (
@@ -298,6 +301,8 @@ func main() {
 			lookupCache: make(map[uint64]*ResolvedObject),
 			br:          br,
 			file:        pf,
+			zr:          zr,
+			hasher:      sha1.New(),
 		}
 
 		nonDelta := 0
@@ -400,6 +405,7 @@ type objectBuilder struct {
 	file        *os.File
 	br          *bufio.Reader
 	zr          io.ReadCloser
+	hasher      hash.Hash
 }
 
 func (builder *objectBuilder) Index() map[uint64]packNode {
@@ -446,7 +452,7 @@ func (builder *objectBuilder) resolveDelta(n *deltaNode) *ResolvedObject {
 	depth := parentResolvedObject.Depth + 1
 	baseType := parentResolvedObject.Type
 	data := applyDelta(n, parentResolvedObject.Data)
-	hash := hashes.ReturnObjectSHA(data, int64(len(data)), baseType)
+	hash := builder.ReturnObjectSHA(data, int64(len(data)), baseType)
 	res := &ResolvedObject{
 		SHA1:       hash,
 		Depth:      depth,
@@ -457,9 +463,26 @@ func (builder *objectBuilder) resolveDelta(n *deltaNode) *ResolvedObject {
 	return res
 }
 
+func (builder *objectBuilder) ReturnObjectSHA(data []byte, size int64, objType uint8) string {
+	if builder.hasher == nil {
+		builder.hasher = sha1.New()
+	} else {
+		builder.hasher.Reset()
+	}
+	sha := sha1.New()
+	sha.Write(TypeToBytes(objType))
+	sha.Write([]byte(" "))
+	sha.Write([]byte(strconv.FormatInt(int64(len(data)), 10)))
+	sha.Write([]byte{0})
+	sha.Write(data)
+
+	h := hex.EncodeToString(sha.Sum(nil))
+	return h
+}
+
 func (builder *objectBuilder) resolveBase(n *objectNode) *ResolvedObject {
 	data := builder.readObjectData(n)
-	hash := hashes.ReturnObjectSHA(data, int64(n.objSize), n.objType)
+	hash := builder.ReturnObjectSHA(data, int64(n.objSize), n.objType)
 	objType := n.Type()
 	depth := 0
 	res := &ResolvedObject{

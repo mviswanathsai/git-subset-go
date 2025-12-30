@@ -3,14 +3,12 @@ package hashes
 import (
 	"compress/zlib"
 	"crypto/sha1"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	fp "path/filepath"
-	"strconv"
 
 	files "github.com/codecrafters-io/git-starter-go/internal/files"
 	git "github.com/codecrafters-io/git-starter-go/internal/git"
@@ -61,33 +59,3 @@ func DecomposeHash(hash string) (dirName, fileName string) {
 	return hash[:2], hash[2:]
 }
 
-func ReturnObjectSHA(data []byte, size int64, objType uint8) string {
-	sha := sha1.New()
-	sha.Write(TypeToBytes(objType))
-	sha.Write([]byte(" "))
-	sha.Write([]byte(strconv.FormatInt(int64(len(data)), 10)))
-	sha.Write([]byte{0})
-	sha.Write(data)
-
-	h := hex.EncodeToString(sha.Sum(nil))
-	return h
-}
-
-func TypeToBytes(input uint8) []byte {
-	switch input {
-	case git.OBJ_COMMIT:
-		return git.GIT_COMMIT
-	case git.OBJ_TREE:
-		return git.GIT_TREE
-	case git.OBJ_BLOB:
-		return git.GIT_BLOB
-	case git.OBJ_TAG:
-		return git.GIT_TAG
-	case git.OBJ_OFS_DELTA:
-		return git.GIT_OFS_DELTA
-	case git.OBJ_REF_DELTA:
-		return git.GIT_REF_DELTA
-	default:
-		return nil
-	}
-}
