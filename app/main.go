@@ -369,7 +369,7 @@ func printResult(res ObjectResult) {
 		// Format: SHA1 TYPE SIZE PACKSIZE OFFSET DEPTH PARENT_SHA1
 		fmt.Printf("%s %-7s %d %d %d %d %s\n",
 			res.SHA1,
-			res.Type,
+			TypeToBytes(res.Type),
 			res.Size,
 			res.PackSize,
 			res.Offset,
@@ -380,7 +380,7 @@ func printResult(res ObjectResult) {
 		// Format: SHA1 TYPE SIZE PACKSIZE OFFSET
 		fmt.Printf("%s %-7s %d %d %d\n",
 			res.SHA1,
-			res.Type,
+			TypeToBytes(res.Type),
 			res.Size,
 			res.PackSize,
 			res.Offset,
@@ -403,7 +403,7 @@ func (builder *objectBuilder) resolveObject(n packNode, currHeaderOfs, nxtHeader
 	resolvedObject := builder.buildObject(n)
 	return ObjectResult{
 		SHA1:       resolvedObject.SHA1,
-		Type:       objectType(resolvedObject.Type),
+		Type:       resolvedObject.Type,
 		Size:       n.ObjectSize(),
 		PackSize:   nxtHeaderOfs - currHeaderOfs,
 		Offset:     currHeaderOfs,
@@ -414,17 +414,21 @@ func (builder *objectBuilder) resolveObject(n packNode, currHeaderOfs, nxtHeader
 
 type ObjectResult struct {
 	SHA1       string
-	Type       string
-	Size       uint64
+	Type       uint8
+	Size       uint64 // The uncompressed size of the object payload
 	PackSize   uint64
 	Offset     uint64
 	Depth      int
 	ParentSHA1 string
 }
 
+func (res *ObjectResult) TypeName() []byte {
+	return TypeToBytes(res.Type)
+}
+
 type ResolvedObject struct {
 	SHA1       string
-	Type       uint8 // "commit", "blob", etc.
+	Type       uint8
 	Depth      int
 	ParentSHA1 string
 	Data       []byte
@@ -435,7 +439,7 @@ func (builder *objectBuilder) resolveDelta(n *deltaNode) *ResolvedObject {
 	depth := parentResolvedObject.Depth + 1
 	baseType := parentResolvedObject.Type
 	data := applyDelta(n, parentResolvedObject.Data)
-	hash := hashes.ReturnObjectSHA(data, int64(len(data)), objectType(baseType))
+	hash := hashes.ReturnObjectSHA(data, int64(len(data)), baseType)
 	res := &ResolvedObject{
 		SHA1:       hash,
 		Depth:      depth,
@@ -448,7 +452,7 @@ func (builder *objectBuilder) resolveDelta(n *deltaNode) *ResolvedObject {
 
 func (builder *objectBuilder) resolveBase(n *objectNode) *ResolvedObject {
 	data := builder.readObjectData(n)
-	hash := hashes.ReturnObjectSHA(data, int64(n.objSize), objectType(n.objType))
+	hash := hashes.ReturnObjectSHA(data, int64(n.objSize), n.objType)
 	objType := n.Type()
 	depth := 0
 	res := &ResolvedObject{
@@ -728,7 +732,7 @@ func readDeltaNegOfs(br *bufio.Reader) uint64 {
 	return size
 }
 
-func objectType(input byte) string {
+func TypeToBytes(input uint8) []byte {
 	switch input {
 	case git.OBJ_COMMIT:
 		return git.GIT_COMMIT
@@ -743,7 +747,7 @@ func objectType(input byte) string {
 	case git.OBJ_REF_DELTA:
 		return git.GIT_REF_DELTA
 	default:
-		return ""
+		return nil
 	}
 }
 

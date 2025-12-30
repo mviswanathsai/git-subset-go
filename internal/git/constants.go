@@ -15,12 +15,6 @@ const (
 	OBJ_TAG             = 4
 	OBJ_OFS_DELTA       = 6
 	OBJ_REF_DELTA       = 7
-	GIT_COMMIT          = "commit"
-	GIT_TREE            = "tree"
-	GIT_BLOB            = "blob"
-	GIT_TAG             = "tag"
-	GIT_OFS_DELTA       = "ofs_delta"
-	GIT_REF_DELTA       = "ref_delta"
 	CopyOffsetFlagsMask = 0b00001111
 	CopySizeFlagsMask   = 0b01110000
 	CopySizeFlagsLen    = 3
@@ -28,4 +22,13 @@ const (
 	CopySizeFlagsShift  = 4
 	CopySizeZero        = 0x10000
 	InsertSizeMask      = 0b01111111
+)
+
+var (
+	GIT_COMMIT    = []byte("commit")
+	GIT_TREE      = []byte("tree")
+	GIT_BLOB      = []byte("blob")
+	GIT_TAG       = []byte("tag")
+	GIT_OFS_DELTA = []byte("ofs_delta")
+	GIT_REF_DELTA = []byte("ref_delta")
 )
