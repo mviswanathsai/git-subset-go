@@ -284,6 +284,7 @@ func main() {
 	}
 }
 
+// TODO: add verification. This can only be run when some info about the pack is already known.
 func (builder *objectBuilder) ComputePackStats() PackStats {
 	stats := PackStats{
 		ChainCounts: make(map[int]int),
