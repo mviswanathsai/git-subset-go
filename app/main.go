@@ -232,21 +232,17 @@ func main() {
 		pf, fileInfo := files.OpenFile(pfPath)
 
 		br := bufio.NewReader(pf)
-
-		ver := make([]byte, 4)
-		nObj := make([]byte, 4)
-
-		// Discard the first 4 bytes
-		br.Discard(4)
-		// Read the version and the nobjects
-		io.ReadFull(br, ver)
-		io.ReadFull(br, nObj)
+		_, nObj, err := readPackHeader(br)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Pack header invalid: %v", err)
+			os.Exit(1)
+		}
 
 		packIndex := make(map[uint64]packNode)
 		packOrder := make([]uint64, 0)
 		var zr io.ReadCloser
 
-		for i := 1; uint32(i) <= binary.BigEndian.Uint32(nObj); i++ {
+		for i := 1; uint32(i) <= nObj; i++ {
 			headerOfs := currentOffset(pf, br)
 			objType, objSize := readObjHeader(br)
 			packOrder = append(packOrder, headerOfs)
@@ -358,6 +354,21 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
 	}
+}
+
+func readPackHeader(r io.Reader) (uint32, uint32, error) {
+	buf := make([]byte, 12)
+
+	// Discard the first 4 bytes
+	io.ReadFull(r, buf)
+
+	if string(buf[:4]) != "PACK" {
+		return 0, 0, fmt.Errorf("not a valid pack file")
+	}
+	// Read the version and the nobjects
+	version := binary.BigEndian.Uint32(buf[4:8])
+	nObj := binary.BigEndian.Uint32(buf[8:12])
+	return version, nObj, nil
 }
 
 func verifyPackTrailer(f *os.File, fInfo os.FileInfo, fileHash []byte) bool {
