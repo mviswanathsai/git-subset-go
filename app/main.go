@@ -261,7 +261,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Expected 20 bytes unread, got %d bytes", bytesLeft)
 		}
 
-		stats := builder.ResolveAll()
+		stats := builder.ComputePackStats()
 		for _, res := range stats.Results {
 			printResult(res)
 		}
@@ -284,7 +284,7 @@ func main() {
 	}
 }
 
-func (builder *objectBuilder) ResolveAll() PackStats {
+func (builder *objectBuilder) ComputePackStats() PackStats {
 	stats := PackStats{
 		ChainCounts: make(map[int]int),
 		Results:     make([]*ObjectResult, 0, len(builder.packOrder)),
