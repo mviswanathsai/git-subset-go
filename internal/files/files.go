@@ -4,7 +4,6 @@ import (
 	"fmt"
 	git "github.com/codecrafters-io/git-starter-go/internal/git"
 	"io"
-	"io/fs"
 	"os"
 )
 
@@ -17,7 +16,7 @@ func CreateTempObjFile() *os.File {
 	return tmpf
 }
 
-func OpenFile(filename string) (*os.File, fs.FileInfo) {
+func OpenFile(filename string) (*os.File, os.FileInfo) {
 	info, err := os.Stat(filename)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching file info: %v\n", err)

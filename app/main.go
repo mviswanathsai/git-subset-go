@@ -238,50 +238,21 @@ func main() {
 			os.Exit(1)
 		}
 
-		packIndex := make(map[uint64]packNode)
-		packOrder := make([]uint64, 0)
 		var zr io.ReadCloser
 
-		for i := 1; uint32(i) <= nObj; i++ {
-			headerOfs := currentOffset(pf, br)
-			objType, objSize := readObjHeader(br)
-			packOrder = append(packOrder, headerOfs)
-
-			var parentOfs uint64
-			if objType == 6 {
-				// The required negative offet from the type byte
-				negOfs := readDeltaNegOfs(br)
-				parentOfs = uint64(headerOfs) - negOfs
-			}
-
-			dataOfs := currentOffset(pf, br)
-			if zr == nil {
-				zr, _ = zlib.NewReader(br)
-			} else {
-				zr.(zlib.Resetter).Reset(br, nil)
-			}
-
-			if objType == 6 {
-				var buf bytes.Buffer
-				srcBufSize, dstBufSize, ops := parseDeltaObj(&buf, zr)
-				packIndex[headerOfs] = &deltaNode{
-					srcBufSize: srcBufSize,
-					dstBufSize: dstBufSize,
-					parentOfs:  parentOfs,
-					ops:        ops,
-					objSize:    objSize,
-					headerOfs:  headerOfs,
-				}
-			} else {
-				io.Copy(io.Discard, zr)
-				packIndex[headerOfs] = &objectNode{
-					objType:    objType,
-					objSize:    objSize,
-					headerOfs:  headerOfs,
-					dataOffset: dataOfs,
-				}
-			}
+		builder := &objectBuilder{
+			packIndex:   make(map[uint64]packNode),
+			lookupCache: make(map[uint64]*ResolvedObject),
+			packOrder:   make([]uint64, 0),
+			packLength:  nObj,
+			br:          br,
+			file:        pf,
+			fileInfo:    fileInfo,
+			zr:          zr,
+			hasher:      sha1.New(),
 		}
+
+		builder.BuildIndex()
 
 		// At this point, only 20 bytes should be left
 		var fileHash []byte
@@ -292,39 +263,14 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Expected 20 bytes unread, got %d bytes", bytesLeft)
 		}
 
-		builder := &objectBuilder{
-			packIndex:   packIndex,
-			lookupCache: make(map[uint64]*ResolvedObject),
-			br:          br,
-			file:        pf,
-			zr:          zr,
-			hasher:      sha1.New(),
+		stats := builder.ResolveAll()
+		for _, res := range stats.Results {
+			printResult(res)
 		}
 
-		nonDelta := 0
-		chainCounts := make(map[int]int) // Maps depth to count
-		for i, offset := range packOrder {
-			node := packIndex[offset]
-
-			var nxtOfs uint64
-			if i < len(packOrder)-1 {
-				nxtOfs = packOrder[i+1]
-			} else {
-				nxtOfs = uint64((fileInfo.Size()) - 20)
-			}
-
-			result := builder.resolveObject(node, offset, nxtOfs)
-			if result.Depth == 0 {
-				nonDelta++
-			} else {
-				chainCounts[result.Depth]++
-			}
-			printResult(result)
-		}
-		// Print the counts
-		fmt.Printf("non delta: %d objects\n", nonDelta)
+		fmt.Printf("non delta: %d objects\n", stats.NonDeltaCount)
 		for depth := 1; ; depth++ {
-			count, exists := chainCounts[depth]
+			count, exists := stats.ChainCounts[depth]
 			if !exists {
 				break
 			}
@@ -353,6 +299,86 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
+	}
+}
+
+func (builder *objectBuilder) ResolveAll() PackStats {
+	stats := PackStats{
+		ChainCounts: make(map[int]int),
+		Results:     make([]*ObjectResult, 0, len(builder.packOrder)),
+	}
+
+	for i, offset := range builder.packOrder {
+		node := builder.packIndex[offset]
+
+		var nxtOfs uint64
+		if i < len(builder.packOrder)-1 {
+			nxtOfs = builder.packOrder[i+1]
+		} else {
+			nxtOfs = uint64(builder.fileInfo.Size() - 20)
+		}
+
+		result := builder.resolveObject(node, offset, nxtOfs)
+
+		// Collect results for printing later
+		stats.Results = append(stats.Results, result)
+
+		// Update stats
+		if result.Depth == 0 {
+			stats.NonDeltaCount++
+		} else {
+			stats.ChainCounts[result.Depth]++
+		}
+	}
+	return stats
+}
+
+type PackStats struct {
+	NonDeltaCount int
+	ChainCounts   map[int]int
+	Results       []*ObjectResult
+}
+
+func (builder *objectBuilder) BuildIndex() {
+	for i := 1; uint32(i) <= builder.packLength; i++ {
+		headerOfs := currentOffset(builder.file, builder.br)
+		objType, objSize := readObjHeader(builder.br)
+		builder.packOrder = append(builder.packOrder, headerOfs)
+
+		var parentOfs uint64
+		if objType == 6 {
+			// The required negative offet from the type byte
+			negOfs := readDeltaNegOfs(builder.br)
+			parentOfs = uint64(headerOfs) - negOfs
+		}
+
+		dataOfs := currentOffset(builder.file, builder.br)
+		if builder.zr == nil {
+			builder.zr, _ = zlib.NewReader(builder.br)
+		} else {
+			builder.zr.(zlib.Resetter).Reset(builder.br, nil)
+		}
+
+		if objType == 6 {
+			var buf bytes.Buffer
+			srcBufSize, dstBufSize, ops := parseDeltaObj(&buf, builder.zr)
+			builder.packIndex[headerOfs] = &deltaNode{
+				srcBufSize: srcBufSize,
+				dstBufSize: dstBufSize,
+				parentOfs:  parentOfs,
+				ops:        ops,
+				objSize:    objSize,
+				headerOfs:  headerOfs,
+			}
+		} else {
+			io.Copy(io.Discard, builder.zr)
+			builder.packIndex[headerOfs] = &objectNode{
+				objType:    objType,
+				objSize:    objSize,
+				headerOfs:  headerOfs,
+				dataOffset: dataOfs,
+			}
+		}
 	}
 }
 
@@ -386,7 +412,7 @@ func verifyPackTrailer(f *os.File, fInfo os.FileInfo, fileHash []byte) bool {
 	return bytes.Equal(fileHash, actual)
 }
 
-func printResult(res ObjectResult) {
+func printResult(res *ObjectResult) {
 	if res.Depth > 0 {
 		// Format: SHA1 TYPE SIZE PACKSIZE OFFSET DEPTH PARENT_SHA1
 		fmt.Printf("%s %-7s %d %d %d %d %s\n",
@@ -412,8 +438,11 @@ func printResult(res ObjectResult) {
 
 type objectBuilder struct {
 	packIndex   map[uint64]packNode
+	packOrder   []uint64
+	packLength  uint32
 	lookupCache map[uint64]*ResolvedObject
 	file        *os.File
+	fileInfo    os.FileInfo
 	br          *bufio.Reader
 	zr          io.ReadCloser
 	hasher      hash.Hash
@@ -423,9 +452,9 @@ func (builder *objectBuilder) Index() map[uint64]packNode {
 	return builder.packIndex
 }
 
-func (builder *objectBuilder) resolveObject(n packNode, currHeaderOfs, nxtHeaderOfs uint64) ObjectResult {
+func (builder *objectBuilder) resolveObject(n packNode, currHeaderOfs, nxtHeaderOfs uint64) *ObjectResult {
 	resolvedObject := builder.buildObject(n)
-	return ObjectResult{
+	return &ObjectResult{
 		SHA1:       resolvedObject.SHA1,
 		Type:       resolvedObject.Type,
 		Size:       n.ObjectSize(),
