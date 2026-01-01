@@ -12,6 +12,7 @@ import (
 	"hash"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	fp "path/filepath"
 	"slices"
@@ -276,6 +277,33 @@ func main() {
 		}
 		if verifyPackTrailer(pf, fileInfo, fileHash) {
 			fmt.Printf("%s: ok\n", pfPath)
+		}
+
+	case "ls-remote":
+		// just get the references from a remote repo
+		repo := os.Args[2]
+		str := fmt.Sprintf("%s/info/refs?service=git-upload-pack", repo)
+		resp, err := http.Get(str)
+		if err != nil {
+			panic(err)
+		}
+		defer resp.Body.Close()
+
+		// git-upload-pack /git-bottom-up\0host=127.0.0.1\0
+		// /git-bottom-up is the repository
+		// the host is the host itself, which in our case would likely be https://github.com
+		br := bufio.NewReader(resp.Body)
+		br.ReadBytes('\n')
+		br.Read(make([]byte, 4))
+		head, _ := br.ReadBytes('\x00')
+		br.ReadBytes('\n')
+        fmt.Printf("%s\t%s\n", head[4:44], head[44:])
+		for {
+			bytes, err := br.ReadBytes('\n')
+			if err != nil {
+				break
+			}
+			fmt.Printf("%s\t%s", bytes[4:44], bytes[44:])
 		}
 
 	default:
