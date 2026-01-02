@@ -289,27 +289,45 @@ func main() {
 		}
 		defer resp.Body.Close()
 
-		// git-upload-pack /git-bottom-up\0host=127.0.0.1\0
-		// /git-bottom-up is the repository
-		// the host is the host itself, which in our case would likely be https://github.com
 		br := bufio.NewReader(resp.Body)
-		br.ReadBytes('\n')
-		br.Read(make([]byte, 4))
-		head, _ := br.ReadBytes('\x00')
-		br.ReadBytes('\n')
-        fmt.Printf("%s\t%s\n", head[4:44], head[44:])
+		// Read till the first flush packet
+		readPktLine(br)
+		readPktLine(br)
 		for {
-			bytes, err := br.ReadBytes('\n')
-			if err != nil {
+			line, err := readPktLine(br)
+			if err != nil || line == nil {
 				break
 			}
-			fmt.Printf("%s\t%s", bytes[4:44], bytes[44:])
+			// If a pktline contains a nul byte in it, only the part upto the null byte is relevant
+			if i := bytes.IndexByte(line, '\x00'); i != -1 {
+				line = line[:i]
+			}
+			fmt.Printf("%s\t%s\n", line[:40], line[41:])
 		}
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
 	}
+}
+
+// Return the pktline without any trailing new-line or nul bytes
+func readPktLine(br *bufio.Reader) ([]byte, error) {
+	pktHeader := make([]byte, 4)
+	_, err := io.ReadFull(br, pktHeader)
+	if err != nil {
+		return nil, err
+	}
+	pktLength, _ := strconv.ParseInt(string(pktHeader), 16, 32)
+	if pktLength == 0 {
+		return nil, nil
+	}
+	out := make([]byte, pktLength-4)
+	_, err = io.ReadFull(br, out)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(out, "\n\x00"), nil
 }
 
 // TODO: add verification. This can only be run when some info about the pack is already known.
