@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	fp "path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -289,9 +290,59 @@ func main() {
 		}
 		defer resp.Body.Close()
 
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotModified {
+			os.Exit(1)
+		}
+
 		br := bufio.NewReader(resp.Body)
+		firstFive, _ := br.Peek(5)
+		if matched, _ := regexp.Match("^[0-9a-f]", firstFive); !matched {
+			os.Exit(1)
+		}
+
 		// Read till the first flush packet
+		svcName, _ := readPktLine(br)
+		if !bytes.Equal(svcName, []byte("# service=git-upload-pack")) {
+			os.Exit(1)
+		}
 		readPktLine(br)
+		for {
+			line, err := readPktLine(br)
+			if err != nil || line == nil {
+				break
+			}
+			// If a pktline contains a nul byte in it, only the part upto the null byte is relevant
+			if i := bytes.IndexByte(line, '\x00'); i != -1 {
+				line = line[:i]
+			}
+			fmt.Printf("%s\t%s\n", line[:40], line[41:])
+		}
+
+	case "negotiate-refs":
+		// just get the references from a remote repo
+		repo := os.Args[2]
+		str := fmt.Sprintf("%s/info/refs?service=git-upload-pack", repo)
+		resp, err := http.Get(str)
+		if err != nil {
+			panic(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotModified {
+			os.Exit(1)
+		}
+
+		br := bufio.NewReader(resp.Body)
+		firstFive, _ := br.Peek(5)
+		if matched, _ := regexp.Match("^[0-9a-f]", firstFive); !matched {
+			os.Exit(1)
+		}
+
+		// Read till the first flush packet
+		svcName, _ := readPktLine(br)
+		if !bytes.Equal(svcName, []byte("# service=git-upload-pack")) {
+			os.Exit(1)
+		}
 		readPktLine(br)
 		for {
 			line, err := readPktLine(br)
