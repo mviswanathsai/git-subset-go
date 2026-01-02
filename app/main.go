@@ -295,23 +295,18 @@ func main() {
 		}
 
 		br := bufio.NewReader(resp.Body)
-		firstFive, _ := br.Peek(5)
-		if matched, _ := regexp.Match("^[0-9a-f]", firstFive); !matched {
+		if err := validateUploadPackResponse(br); err != nil {
 			os.Exit(1)
 		}
 
-		// Read till the first flush packet
-		svcName, _ := readPktLine(br)
-		if !bytes.Equal(svcName, []byte("# service=git-upload-pack")) {
-			os.Exit(1)
-		}
 		readPktLine(br)
 		for {
 			line, err := readPktLine(br)
 			if err != nil || line == nil {
 				break
 			}
-			// If a pktline contains a nul byte in it, only the part upto the null byte is relevant
+			// If a pktline contains a nul byte, it must be the first ref. Everything after the
+			// NUL byte is just capability declarations.
 			if i := bytes.IndexByte(line, '\x00'); i != -1 {
 				line = line[:i]
 			}
@@ -349,17 +344,31 @@ func main() {
 			if err != nil || line == nil {
 				break
 			}
-			// If a pktline contains a nul byte in it, only the part upto the null byte is relevant
 			if i := bytes.IndexByte(line, '\x00'); i != -1 {
 				line = line[:i]
 			}
 			fmt.Printf("%s\t%s\n", line[:40], line[41:])
 		}
+		// Now we have to create the want/have request. In our case, just wants.
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
 	}
+}
+
+func validateUploadPackResponse(br *bufio.Reader) error {
+	firstFive, _ := br.Peek(5)
+	if matched, _ := regexp.Match("^[0-9a-f]", firstFive); !matched {
+		return fmt.Errorf("Invalid response")
+	}
+
+	// Read till the first flush packet
+	svcName, _ := readPktLine(br)
+	if !bytes.Equal(svcName, []byte("# service=git-upload-pack")) {
+		return fmt.Errorf("Invalid response")
+	}
+	return nil
 }
 
 // Return the pktline without any trailing new-line or nul bytes
