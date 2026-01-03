@@ -339,35 +339,26 @@ func main() {
 			os.Exit(1)
 		}
 		readPktLine(br)
-		clientSupported := []string{
-			"multi_ack_detailed",
-			"side-band-64k",
-			"ofs-delta",
-		}
-		negotiated := make([]string, 3)
+		var negotiated []byte
 		var sha [][]byte
 		for {
 			line, err := readPktLine(br)
 			if err != nil || line == nil {
 				break
 			}
-			caps := make([]byte, 0, len(line)-40)
 			// If a pktline contains a nul byte, it must be the first ref. Everything after the
 			// NUL byte is capability declarations.
 			if i := bytes.IndexByte(line, '\x00'); i != -1 {
-				caps = line[i+1:]
+				var buf bytes.Buffer
+                sCaps:= strings.Split(string(line[i+1:]), " ")
 				line = line[:i]
-				serverHas := strings.Split(string(caps), " ")
-				set := make(map[string]struct{})
-				for _, c := range serverHas {
-					set[strings.TrimSpace(c)] = struct{}{}
-				}
-
-				for _, c := range clientSupported {
-					if _, ok := set[c]; ok {
-						negotiated = append(negotiated, c)
+				for _, sCap := range sCaps {
+					if _, ok := git.C_CAPS[sCap]; ok {
+						buf.WriteString(sCap)
+						buf.WriteByte(' ')
 					}
 				}
+				negotiated = bytes.TrimSpace(buf.Bytes())
 			}
 			sha = append(sha, line[:40])
 		}
@@ -375,21 +366,19 @@ func main() {
 		var out bytes.Buffer
 		for i, pkt := range sha {
 			if i == 0 {
-				// 1. Build the capability string
-				capString := strings.TrimSpace(strings.Join(negotiated, " "))
 				// 2. Format the full payload (want + SHA + space + caps + newline)
 				// Note: Git usually expects a newline at the end of the pkt-line.
-				payload := fmt.Sprintf("want %s %s\n", pkt, capString)
+				pktLength := 4 + len(pkt) + len(negotiated)
 
 				// 3. The total length is the payload + the 4-byte header
-				pktHeader := fmt.Sprintf("%04x", len(payload)+4) // the length is 4 + 4 + length of capabilities + length of refs
+				pktHeader := fmt.Sprintf("%04x", pktLength+4) // the length is 4 + 4 + length of capabilities + length of refs
 				out.Write([]byte(pktHeader))
 				out.Write([]byte("want "))
 				out.Write(pkt)
 				out.WriteByte(' ')
 				out.Write([]byte("HEAD"))
 				out.WriteByte(' ')
-				out.Write([]byte(capString))
+				out.Write(negotiated)
 				out.WriteByte('\n')
 			}
 			out.Write([]byte("0032"))

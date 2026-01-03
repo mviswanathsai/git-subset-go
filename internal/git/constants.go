@@ -31,4 +31,9 @@ var (
 	GIT_TAG       = []byte("tag")
 	GIT_OFS_DELTA = []byte("ofs_delta")
 	GIT_REF_DELTA = []byte("ref_delta")
+	C_CAPS        = map[string]struct{}{
+		"multi_ack_detailed": {},
+		"side-band-64k":      {},
+		"ofs-delta":          {},
+	}
 )
