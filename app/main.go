@@ -340,19 +340,16 @@ func main() {
 		}
 		readPktLine(br)
 		var negotiated []byte
-		var sha [][]byte
+		var shas [][]byte
 		for {
 			line, err := readPktLine(br)
 			if err != nil || line == nil {
 				break
 			}
-			// If a pktline contains a nul byte, it must be the first ref. Everything after the
-			// NUL byte is capability declarations.
-			if i := bytes.IndexByte(line, '\x00'); i != -1 {
+			line, caps, found := bytes.Cut(line, []byte{'\x00'})
+			if found {
 				var buf bytes.Buffer
-                sCaps:= strings.Split(string(line[i+1:]), " ")
-				line = line[:i]
-				for _, sCap := range sCaps {
+				for sCap := range strings.SplitSeq(string(caps), " ") {
 					if _, ok := git.C_CAPS[sCap]; ok {
 						buf.WriteString(sCap)
 						buf.WriteByte(' ')
@@ -360,38 +357,81 @@ func main() {
 				}
 				negotiated = bytes.TrimSpace(buf.Bytes())
 			}
-			sha = append(sha, line[:40])
+			// TODO: maybe deduplicate this in the future
+			if bytes.Contains(line, []byte("^{}")) {
+				continue
+			}
+			shas = append(shas, line[:40])
 		}
 		// Now we have to create the want/have request. In our case, just wants.
-		var out bytes.Buffer
-		for i, pkt := range sha {
-			if i == 0 {
-				// 2. Format the full payload (want + SHA + space + caps + newline)
-				// Note: Git usually expects a newline at the end of the pkt-line.
-				pktLength := 4 + len(pkt) + len(negotiated)
-
-				// 3. The total length is the payload + the 4-byte header
-				pktHeader := fmt.Sprintf("%04x", pktLength+4) // the length is 4 + 4 + length of capabilities + length of refs
-				out.Write([]byte(pktHeader))
-				out.Write([]byte("want "))
-				out.Write(pkt)
-				out.WriteByte(' ')
-				out.Write([]byte("HEAD"))
-				out.WriteByte(' ')
-				out.Write(negotiated)
-				out.WriteByte('\n')
-			}
-			out.Write([]byte("0032"))
-			out.Write([]byte("want "))
-			out.Write(pkt)
-			out.WriteByte('\n')
+		var reqBody bytes.Buffer
+		prepareReq(&reqBody, shas, negotiated)
+		str2 := fmt.Sprintf("%s/git-upload-pack", repo)
+		res, err := http.Post(str2, "application/x-git-upload-pack-request", &reqBody)
+		if res.StatusCode != http.StatusOK {
+			fmt.Printf("Some yeeyeeass error bro: %d", res.StatusCode)
 		}
-		io.Copy(os.Stdout, &out)
+
+		// Reset the reader
+		br.Reset(res.Body)
+		tmp, _ := os.CreateTemp(".", "tmp_pack_")
+		// Demux the response
+		for {
+			// 1. Read the 4-byte hex length
+			hexLen := make([]byte, 4)
+			_, err := io.ReadFull(br, hexLen)
+			if err == io.EOF {
+				break
+			}
+
+			var length int
+			fmt.Sscanf(string(hexLen), "%04x", &length)
+
+			if length == 0 { // Flush packet
+				continue
+			}
+
+			if peek, _ := br.Peek(4); bytes.HasPrefix(peek, []byte("NAK")) {
+				br.Discard(length - 4)
+				continue
+			}
+			// 3. Check the first byte (The Channel)
+			channel, _ := br.ReadByte()
+
+			switch channel {
+			case 1:
+				// stream the response body into packfile parsing
+				io.CopyN(tmp, br, int64(length-5))
+			case 2:
+				// This is progress text. Print to stderr.
+				io.CopyN(os.Stderr, br, int64(length-5))
+			case 3:
+				// This is a remote error.
+				io.CopyN(os.Stderr, br, int64(length-5))
+			}
+		}
+		os.Rename(tmp.Name(), "packfile.pack")
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
 	}
+}
+
+func prepareReq(buf *bytes.Buffer, shas [][]byte, negotiated []byte) {
+	for i, pkt := range shas {
+		var pktPayload string
+		if i == 0 {
+			pktPayload = fmt.Sprintf("want %s %s\n", pkt, negotiated)
+		} else {
+			pktPayload = fmt.Sprintf("want %s\n", pkt)
+		}
+		pktHeader := fmt.Sprintf("%04x", len(pktPayload)+4)
+		buf.WriteString(pktHeader)
+		buf.WriteString(pktPayload)
+	}
+	buf.WriteString("0000")
+	buf.WriteString("0009done\n")
 }
 
 func validateUploadPackResponse(br *bufio.Reader) error {
