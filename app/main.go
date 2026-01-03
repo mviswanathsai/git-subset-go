@@ -339,17 +339,65 @@ func main() {
 			os.Exit(1)
 		}
 		readPktLine(br)
+		clientSupported := []string{
+			"multi_ack_detailed",
+			"side-band-64k",
+			"ofs-delta",
+		}
+		negotiated := make([]string, 3)
+		var sha [][]byte
 		for {
 			line, err := readPktLine(br)
 			if err != nil || line == nil {
 				break
 			}
+			caps := make([]byte, 0, len(line)-40)
+			// If a pktline contains a nul byte, it must be the first ref. Everything after the
+			// NUL byte is capability declarations.
 			if i := bytes.IndexByte(line, '\x00'); i != -1 {
+				caps = line[i+1:]
 				line = line[:i]
+				serverHas := strings.Split(string(caps), " ")
+				set := make(map[string]struct{})
+				for _, c := range serverHas {
+					set[strings.TrimSpace(c)] = struct{}{}
+				}
+
+				for _, c := range clientSupported {
+					if _, ok := set[c]; ok {
+						negotiated = append(negotiated, c)
+					}
+				}
 			}
-			fmt.Printf("%s\t%s\n", line[:40], line[41:])
+			sha = append(sha, line[:40])
 		}
 		// Now we have to create the want/have request. In our case, just wants.
+		var out bytes.Buffer
+		for i, pkt := range sha {
+			if i == 0 {
+				// 1. Build the capability string
+				capString := strings.TrimSpace(strings.Join(negotiated, " "))
+				// 2. Format the full payload (want + SHA + space + caps + newline)
+				// Note: Git usually expects a newline at the end of the pkt-line.
+				payload := fmt.Sprintf("want %s %s\n", pkt, capString)
+
+				// 3. The total length is the payload + the 4-byte header
+				pktHeader := fmt.Sprintf("%04x", len(payload)+4) // the length is 4 + 4 + length of capabilities + length of refs
+				out.Write([]byte(pktHeader))
+				out.Write([]byte("want "))
+				out.Write(pkt)
+				out.WriteByte(' ')
+				out.Write([]byte("HEAD"))
+				out.WriteByte(' ')
+				out.Write([]byte(capString))
+				out.WriteByte('\n')
+			}
+			out.Write([]byte("0032"))
+			out.Write([]byte("want "))
+			out.Write(pkt)
+			out.WriteByte('\n')
+		}
+		io.Copy(os.Stdout, &out)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
@@ -372,9 +420,9 @@ func validateUploadPackResponse(br *bufio.Reader) error {
 }
 
 // Return the pktline without any trailing new-line or nul bytes
-func readPktLine(br *bufio.Reader) ([]byte, error) {
+func readPktLine(r io.Reader) ([]byte, error) {
 	pktHeader := make([]byte, 4)
-	_, err := io.ReadFull(br, pktHeader)
+	_, err := io.ReadFull(r, pktHeader)
 	if err != nil {
 		return nil, err
 	}
@@ -383,7 +431,7 @@ func readPktLine(br *bufio.Reader) ([]byte, error) {
 		return nil, nil
 	}
 	out := make([]byte, pktLength-4)
-	_, err = io.ReadFull(br, out)
+	_, err = io.ReadFull(r, out)
 	if err != nil {
 		return nil, err
 	}
