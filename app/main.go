@@ -414,7 +414,7 @@ func main() {
 				io.CopyN(os.Stderr, br, int64(length-5))
 			}
 		}
-		// create the directory
+		// create the .git directory and packfile
 		workingDir := "test-repo"
 		tmp.Seek(-20, 2)
 		br.Reset(tmp)
@@ -438,6 +438,7 @@ func main() {
 			fmt.Printf("Error renaming file: %v\n", err)
 		}
 
+		// Write the objects into the git object store
 		pf, fileInfo := files.OpenFile(packFile)
 
 		br.Reset(pf)
@@ -492,7 +493,47 @@ func main() {
 				os.Exit(1)
 			}
 		}
-		fmt.Println("Done")
+
+		remoteHeadSHA := refs["HEAD"]
+		var localDefaultBranch string
+		// create the .git/refs directory
+		for ref, SHA := range refs {
+			if ref != "HEAD" && slices.Equal(SHA, remoteHeadSHA) {
+				localDefaultBranch = ref
+			}
+
+			localRef := strings.Replace(ref, "refs/heads/", "refs/remotes/origin/", 1)
+
+			destPath := fp.Join(workingDir, ".git", localRef)
+			parentDir := fp.Dir(destPath)
+
+			if err := os.MkdirAll(parentDir, 0755); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				continue
+			}
+
+			// 4. Write the SHA as the file content
+			// 'object' is the SHA-1 hash (40 bytes)
+			if err := os.WriteFile(destPath, append(SHA, '\n'), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			}
+		}
+
+		if localDefaultBranch != "" {
+			// Set the remote HEAD ref
+			localRef := strings.Replace(localDefaultBranch, "refs/heads/", "refs/remotes/origin/", 1)
+			originHeadPath := fp.Join(workingDir, ".git", "refs/remotes/origin/HEAD")
+			symbolicContent := fmt.Sprintf("ref: %s\n", localRef)
+			os.WriteFile(originHeadPath, []byte(symbolicContent), 0644)
+
+			// Create the LOCAL branch ref (e.g., .git/refs/heads/main)
+			localBranchPath := fp.Join(workingDir, ".git", localDefaultBranch)
+			os.MkdirAll(fp.Dir(localBranchPath), 0755)
+			os.WriteFile(localBranchPath, append(remoteHeadSHA, '\n'), 0644)
+			rootHeadPath := fp.Join(workingDir, ".git", "HEAD")
+			rootHeadContent := fmt.Sprintf("ref: %s\n", localDefaultBranch)
+			os.WriteFile(rootHeadPath, []byte(rootHeadContent), 0644)
+		}
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
