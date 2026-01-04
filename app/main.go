@@ -16,6 +16,7 @@ import (
 	"os"
 	fp "path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -59,7 +60,7 @@ func main() {
 		blobname := objhash[2:]
 
 		// we first need to open the file
-		filename := fp.Join(git.GitObjDir, blobdir, blobname)
+		filename := fp.Join("test-repo", git.GitObjDir, blobdir, blobname)
 		f, err := os.Open(filename)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error opening file: %v\n", err)
@@ -454,12 +455,14 @@ func main() {
 			packIndex:   make(map[uint64]packNode),
 			lookupCache: make(map[uint64]*ResolvedObject),
 			packOrder:   make([]uint64, 0),
+			hashMap:     make(map[string]*ResolvedObject),
 			packLength:  nObj,
 			br:          br,
 			file:        pf,
 			fileInfo:    fileInfo,
 			zr:          zr,
 			hasher:      sha1.New(),
+			workingDir:  workingDir,
 		}
 
 		builder.BuildIndex()
@@ -468,6 +471,7 @@ func main() {
 			node := builder.packIndex[offset]
 
 			resolved := builder.buildObject(node)
+			builder.hashMap[resolved.SHA1] = resolved
 			objDirName, objFileName := hashes.DecomposeHash(resolved.SHA1)
 
 			err = os.MkdirAll(fp.Join(workingDir, git.GitObjDir, objDirName), 0775)
@@ -485,14 +489,19 @@ func main() {
 			zw.Write(TypeToBytes(resolved.Type))
 			zw.Write([]byte{' '})
 			zw.Write(fmt.Appendf(nil, "%d", len(resolved.Data)))
+			zw.Write([]byte{'\x00'})
 			zw.Write(resolved.Data)
 			zw.Close()
+
 			objFilePath := fp.Join(workingDir, git.GitObjDir, objDirName, objFileName)
 			if err = os.Rename(tmpf.Name(), objFilePath); err != nil {
 				fmt.Fprintf(os.Stderr, "Error creating object: %v\n", err)
 				os.Exit(1)
 			}
 		}
+		// Get rid of the cache at this point, we don't need it anymore
+		builder.lookupCache = nil
+		runtime.GC()
 
 		remoteHeadSHA := refs["HEAD"]
 		var localDefaultBranch string
@@ -535,10 +544,98 @@ func main() {
 			os.WriteFile(rootHeadPath, []byte(rootHeadContent), 0644)
 		}
 
+		// Checkout into the current HEAD
+		headSHA := refs["HEAD"]
+		// Read it from the hashMap
+		builder.checkoutRepository(headSHA)
+		// When I see a tree:
+		// 1. I need to create a directory for it.
+		// 2. I need to parse the contents of the tree into it's own directory
+		// 3. Repeat
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
 	}
+}
+
+func (builder *objectBuilder) checkoutRepository(headSHA []byte) {
+	headCommit := builder.hashMap[string(headSHA)]
+	treeSHA := returnCommitTreeSHA(headCommit.Data)
+	treeData := builder.hashMap[treeSHA].Data
+	builder.buildRepository(builder.workingDir, treeData)
+}
+
+// When I see a tree:
+// 1. I need to create a directory for it.
+// 2. I need to parse the contents of the tree into it's own directory
+// 3. Repeat
+func (builder *objectBuilder) buildRepository(workingDir string, treeData []byte) {
+	treeEntries := parseTree(treeData)
+	for _, treeEntry := range treeEntries {
+		if treeEntry.mode != git.GitDirMode {
+			// write the files
+			os.WriteFile(fp.Join(workingDir, treeEntry.name), builder.hashMap[treeEntry.sha1].Data, TranslateGitMode(treeEntry.mode))
+		} else {
+            curDir := fp.Join(workingDir, treeEntry.name)
+            os.MkdirAll(curDir, 0755)
+			treeData := builder.hashMap[treeEntry.sha1].Data
+			builder.buildRepository(fp.Join(workingDir, treeEntry.name), treeData)
+		}
+	}
+}
+
+// TranslateGitMode converts Git mode strings to standard Unix os.FileMode
+func TranslateGitMode(gitMode string) os.FileMode {
+	switch gitMode {
+	case "100755":
+		// Executable file
+		return 0755
+	case "100644":
+		// Regular non-executable file
+		return 0644
+	default:
+		// Default fallback for safety (regular file)
+		return 0644
+	}
+}
+
+type TreeEntry struct {
+	mode string
+	name string
+	sha1 string
+}
+
+func returnCommitTreeSHA(commitData []byte) string {
+	return string(commitData[5:45])
+}
+
+func parseTree(treeData []byte) []*TreeEntry {
+	var out []*TreeEntry
+	for {
+		spaceIdx := bytes.IndexByte(treeData, ' ')
+		delimIdx := bytes.IndexByte(treeData, '\x00')
+
+		if spaceIdx == -1 || delimIdx == -1 {
+			fmt.Fprintf(os.Stderr, "Unexpected absence of delim byte")
+		}
+
+		modei := string(treeData[:spaceIdx])
+		namei := string(treeData[spaceIdx+1 : delimIdx])
+		hashi := hex.EncodeToString(treeData[delimIdx+1 : delimIdx+21])
+
+		out = append(out, &TreeEntry{mode: modei, name: namei, sha1: hashi})
+
+		if isLastTreeEntry(treeData, delimIdx) {
+			break
+		}
+
+		treeData = treeData[delimIdx+21:]
+	}
+	return out
+}
+
+func isLastTreeEntry(treeData []byte, delimIdx int) bool {
+	return len(treeData[delimIdx+1:]) <= 20
 }
 
 func prepareReq(buf *bytes.Buffer, refs map[string][]byte, negotiated []byte) {
@@ -730,12 +827,14 @@ type objectBuilder struct {
 	packOrder   []uint64
 	packLength  uint32
 	lookupCache map[uint64]*ResolvedObject
+	hashMap     map[string]*ResolvedObject
 	file        *os.File
 	fileInfo    os.FileInfo
 	br          *bufio.Reader
 	zr          io.ReadCloser
 	zw          *zlib.Writer
 	hasher      hash.Hash
+	workingDir  string
 }
 
 func (builder *objectBuilder) getZlibWriter(w io.Writer) *zlib.Writer {
