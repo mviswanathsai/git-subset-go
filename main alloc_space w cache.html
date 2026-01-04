@@ -1,0 +1,1743 @@
+<!DOCTYPE html>
+<html><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <meta charset="utf-8">
+  <title>main alloc_space</title>
+  <style type="text/css">
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+html, body {
+  height: 100%;
+}
+body {
+  font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+  font-size: 13px;
+  line-height: 1.4;
+  display: flex;
+  flex-direction: column;
+}
+a {
+  color: #2a66d9;
+}
+.header {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  min-height: 44px;
+  background-color: #eee;
+  color: #212121;
+  padding: 0 1rem;
+}
+.header > div {
+  margin: 0 0.125em;
+}
+.header .title h1 {
+  font-size: 1.75em;
+  margin-right: 1rem;
+  margin-bottom: 4px;
+}
+.header .title a {
+  color: #212121;
+  text-decoration: none;
+}
+.header .title a:hover {
+  text-decoration: underline;
+}
+.header .description {
+  width: 100%;
+  text-align: right;
+  white-space: nowrap;
+}
+@media screen and (max-width: 799px) {
+  .header input {
+    display: none;
+  }
+}
+#detailsbox {
+  display: none;
+  position: fixed;
+  top: 40px;
+  right: 20px;
+  background-color: #ffffff;
+  box-shadow: 0 1px 5px rgba(0,0,0,.3);
+  line-height: 24px;
+  padding: 1em;
+  text-align: left;
+}
+.header input {
+  background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' style='pointer-events:none;display:block;width:100%25;height:100%25;fill:%23757575'%3E%3Cpath d='M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61.0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/%3E%3C/svg%3E") no-repeat 4px center/20px 20px;
+  border: 1px solid #d1d2d3;
+  border-radius: 2px 0 0 2px;
+  padding: 0.25em;
+  padding-left: 28px;
+  margin-left: 1em;
+  font-family: 'Roboto', 'Noto', sans-serif;
+  font-size: 1em;
+  line-height: 24px;
+  color: #212121;
+}
+.downArrow {
+  border-top: .36em solid #ccc;
+  border-left: .36em solid transparent;
+  border-right: .36em solid transparent;
+  margin-bottom: .05em;
+  margin-left: .5em;
+  transition: border-top-color 200ms;
+}
+.menu-item {
+  height: 100%;
+  text-transform: uppercase;
+  font-family: 'Roboto Medium', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+  position: relative;
+}
+.menu-item .menu-name:hover {
+  opacity: 0.75;
+}
+.menu-item .menu-name:hover .downArrow {
+  border-top-color: #666;
+}
+.menu-name {
+  height: 100%;
+  padding: 0 0.5em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.menu-name a {
+  text-decoration: none;
+  color: #212121;
+}
+.submenu {
+  display: none;
+  margin-top: -4px;
+  min-width: 10em;
+  position: absolute;
+  left: 0px;
+  background-color: white;
+  box-shadow: 0 1px 5px rgba(0,0,0,.3);
+  font-size: 100%;
+  text-transform: none;
+  white-space: nowrap;
+}
+.menu-item, .submenu {
+  user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  -webkit-user-select: none;
+}
+.submenu hr {
+  border: 0;
+  border-top: 2px solid #eee;
+}
+.submenu a {
+  display: block;
+  padding: .5em 1em;
+  text-decoration: none;
+}
+.submenu a:hover, .submenu a.active {
+  color: white;
+  background-color: #6b82d6;
+}
+.submenu a.disabled {
+  color: gray;
+  pointer-events: none;
+}
+.menu-check-mark {
+  position: absolute;
+  left: 2px;
+}
+.menu-delete-btn {
+  position: absolute;
+  right: 2px;
+}
+
+.help {
+  padding-left: 1em;
+}
+
+
+#dialog-overlay {
+  display: none;
+  position: fixed;
+  left: 0px;
+  top: 0px;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(1,1,1,0.1);
+}
+
+.dialog {
+  
+  display: none;
+  position: fixed;
+  margin: 0px;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 125%;
+  background-color: #ffffff;
+  box-shadow: 0 1px 5px rgba(0,0,0,.3);
+}
+.dialog-header {
+  font-size: 120%;
+  border-bottom: 1px solid #CCCCCC;
+  width: 100%;
+  text-align: center;
+  background: #EEEEEE;
+  user-select: none;
+}
+.dialog-footer {
+  border-top: 1px solid #CCCCCC;
+  width: 100%;
+  text-align: right;
+  padding: 10px;
+}
+.dialog-error {
+  margin: 10px;
+  color: red;
+}
+.dialog input {
+  margin: 10px;
+  font-size: inherit;
+}
+.dialog button {
+  margin-left: 10px;
+  font-size: inherit;
+}
+#save-dialog, #delete-dialog {
+  width: 50%;
+  max-width: 20em;
+}
+#delete-prompt {
+  padding: 10px;
+}
+
+#content {
+  overflow-y: scroll;
+  padding: 1em;
+}
+#top {
+  overflow-y: scroll;
+}
+#graph {
+  overflow: hidden;
+}
+#graph svg {
+  width: 100%;
+  height: auto;
+  padding: 10px;
+}
+#content.source .filename {
+  margin-top: 0;
+  margin-bottom: 1em;
+  font-size: 120%;
+}
+#content.source pre {
+  margin-bottom: 3em;
+}
+table {
+  border-spacing: 0px;
+  width: 100%;
+  padding-bottom: 1em;
+  white-space: nowrap;
+}
+table thead {
+  font-family: 'Roboto Medium', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+}
+table tr th {
+  position: sticky;
+  top: 0;
+  background-color: #ddd;
+  text-align: right;
+  padding: .3em .5em;
+}
+table tr td {
+  padding: .3em .5em;
+  text-align: right;
+}
+#top table tr th:nth-child(6),
+#top table tr th:nth-child(7),
+#top table tr td:nth-child(6),
+#top table tr td:nth-child(7) {
+  text-align: left;
+}
+#top table tr td:nth-child(6) {
+  width: 100%;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+#flathdr1, #flathdr2, #cumhdr1, #cumhdr2, #namehdr {
+  cursor: ns-resize;
+}
+.hilite {
+  background-color: #ebf5fb;
+  font-weight: bold;
+}
+ 
+.boxtext         { z-index: 2; }   
+#current-details { z-index: 2; }   
+#detailsbox      { z-index: 3; }   
+.submenu         { z-index: 4; }
+.dialog          { z-index: 5; }
+</style>
+
+  <style type="text/css">
+#graph {
+    cursor: grab;
+}
+
+#graph:active {
+    cursor: grabbing;
+}
+</style>
+
+</head>
+<body>
+  <div class="header">
+  <div class="title">
+    <h1><a href="http://localhost:8080/ui/">pprof</a></h1>
+  </div>
+
+  <div id="view" class="menu-item">
+    <div class="menu-name">
+      View
+      <i class="downArrow"></i>
+    </div>
+    <div class="submenu" style="display: none;">
+      <a title="Outputs top entries in text form" href="http://localhost:8080/ui/top" id="topbtn">Top</a>
+      <a title="Display profile as a directed graph" href="http://localhost:8080/ui/" id="graphbtn">Graph</a>
+      <a title="Display profile as a flame graph" href="http://localhost:8080/ui/flamegraph" id="flamegraph">Flame Graph</a>
+      <a title="Output callers/callees of functions matching regexp" href="http://localhost:8080/ui/peek" id="peek">Peek</a>
+      <a title="Output annotated source for functions matching regexp" href="http://localhost:8080/ui/source" id="list">Source</a>
+      <a title="Output assembly listings annotated with samples" href="http://localhost:8080/ui/disasm" id="disasm">Disassemble</a>
+    </div>
+  </div>
+
+  
+  
+  <div id="sample" class="menu-item">
+    <div class="menu-name">
+      Sample
+      <i class="downArrow"></i>
+    </div>
+    <div class="submenu">
+      
+      <a href="http://localhost:8080/ui/?si=alloc_objects" id="sampletype-alloc_objects">alloc_objects</a>
+      
+      <a href="http://localhost:8080/ui/?si=alloc_space" id="sampletype-alloc_space">alloc_space</a>
+      
+      <a href="http://localhost:8080/ui/?si=inuse_objects" id="sampletype-inuse_objects">inuse_objects</a>
+      
+      <a href="http://localhost:8080/ui/?si=inuse_space" id="sampletype-inuse_space">inuse_space</a>
+      
+    </div>
+  </div>
+  
+
+  <div id="refine" class="menu-item">
+    <div class="menu-name">
+      Refine
+      <i class="downArrow"></i>
+    </div>
+    <div class="submenu">
+      <a title="Restricts to samples going through a node matching regexp
+Discard samples that do not include a node matching this regexp.
+Matching includes the function name, filename or object name.
+" href="http://localhost:8080/ui/?" id="focus" class="disabled">Focus</a>
+      <a title="Skips paths going through any nodes matching regexp
+If set, discard samples that include a node matching this regexp.
+Matching includes the function name, filename or object name.
+" href="http://localhost:8080/ui/?" id="ignore" class="disabled">Ignore</a>
+      <a title="Skips nodes matching regexp
+Discard nodes that match this location.
+Other nodes from samples that include this location will be shown.
+Matching includes the function name, filename or object name.
+" href="http://localhost:8080/ui/?" id="hide" class="disabled">Hide</a>
+      <a title="Only show nodes matching regexp
+If set, only show nodes that match this location.
+Matching includes the function name, filename or object name.
+" href="http://localhost:8080/ui/?" id="show" class="disabled">Show</a>
+      <a title="Drops functions above the highest matched frame.
+If set, all frames above the highest match are dropped from every sample.
+Matching includes the function name, filename or object name.
+" href="http://localhost:8080/ui/?" id="show-from" class="disabled">Show from</a>
+      <hr>
+      <a title="Show the entire profile" href="http://localhost:8080/ui/?">Reset</a>
+    </div>
+  </div>
+
+  <div id="config" class="menu-item">
+    <div class="menu-name">
+      Config
+      <i class="downArrow"></i>
+    </div>
+    <div class="submenu">
+      <a title="Save current settings" id="save-config">Save as ...</a>
+      <hr>
+      
+      <a href="http://localhost:8080/ui/?si=alloc_space">
+        <span class="menu-check-mark">✓</span>
+        Default
+        
+      </a>
+      
+    </div>
+  </div>
+
+  <div id="download" class="menu-item">
+    <div class="menu-name">
+      <a href="http://localhost:8080/ui/download">Download</a>
+    </div>
+  </div>
+
+  <div>
+    <input id="search" type="text" placeholder="Search regexp" autocomplete="off" autocapitalize="none" size="40">
+  </div>
+
+  <div class="description">
+    <a title="Show information about the profile and this view" href="#" id="details">main alloc_space</a>
+    <div id="detailsbox">
+      <div>File: main</div><div>Build ID: dc79db735217c6d9cb14014316ec175eb6075ad1</div><div>Type: alloc_space</div><div>Time: 2025-12-29 19:04:07 IST</div><div>Showing nodes accounting for 2580.79kB, 100% of 2580.79kB total</div><div>
+See https://git.io/JfYMW for how to read the graph</div>
+    </div>
+  </div>
+
+  
+</div>
+
+<div id="dialog-overlay"></div>
+
+<div class="dialog" id="save-dialog">
+  <div class="dialog-header">Save options as</div>
+  <datalist id="config-list">
+    
+  </datalist>
+  <input id="save-name" type="text" list="config-list" placeholder="New config">
+  <div class="dialog-footer">
+    <span class="dialog-error" id="save-error"></span>
+    <button id="save-cancel">Cancel</button>
+    <button id="save-confirm">Save</button>
+  </div>
+</div>
+
+<div class="dialog" id="delete-dialog">
+  <div class="dialog-header" id="delete-dialog-title">Delete config</div>
+  <div id="delete-prompt"></div>
+  <div class="dialog-footer">
+    <span class="dialog-error" id="delete-error"></span>
+    <button id="delete-cancel">Cancel</button>
+    <button id="delete-confirm">Delete</button>
+  </div>
+</div>
+
+<div id="errors"></div>
+
+  <div id="graph">
+    <svg width="583pt" height="1170pt" viewBox="-718.222 -106.036 2433.25 4887.38" xmlns="http://www.w3.org/2000/svg" xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 1166)">
+<title>main</title>
+<polygon fill="white" stroke="transparent" points="-4,4 -4,-1166 578.5,-1166 578.5,4 -4,4"></polygon>
+<!-- N1 -->
+<g id="node1" class="node">
+<title>N1</title>
+<g id="a_node1"><a xlink:title="compress/flate.NewReader (1554.79kB)">
+<polygon fill="#edd8d5" stroke="#b21900" points="293,-419 0,-419 0,-307 293,-307 293,-419"></polygon>
+<text text-anchor="middle" x="146.5" y="-395.8" font-family="Times,serif" font-size="24.00">flate</text>
+<text text-anchor="middle" x="146.5" y="-369.8" font-family="Times,serif" font-size="24.00">NewReader</text>
+<text text-anchor="middle" x="146.5" y="-343.8" font-family="Times,serif" font-size="24.00">1026.63kB (39.78%)</text>
+<text text-anchor="middle" x="146.5" y="-317.8" font-family="Times,serif" font-size="24.00">of 1554.79kB (60.24%)</text>
+</a>
+</g>
+</g>
+<!-- NN1_0 -->
+<g id="NN1_0" class="node">
+<title>NN1_0</title>
+<g id="a_NN1_0"><a xlink:title="1026.63kB">
+<polygon fill="#f8f8f8" stroke="black" points="173.5,-256 123.5,-256 119.5,-252 119.5,-220 169.5,-220 173.5,-224 173.5,-256"></polygon>
+<polyline fill="none" stroke="black" points="169.5,-252 119.5,-252 "></polyline>
+<polyline fill="none" stroke="black" points="169.5,-252 169.5,-220 "></polyline>
+<polyline fill="none" stroke="black" points="169.5,-252 173.5,-256 "></polyline>
+<text text-anchor="middle" x="146.5" y="-236.1" font-family="Times,serif" font-size="8.00">2.62kB</text>
+</a>
+</g>
+</g>
+<!-- N1&#45;&gt;NN1_0 -->
+<g id="edge1" class="edge">
+<title>N1-&gt;NN1_0</title>
+<g id="a_edge1"><a xlink:title="1026.63kB">
+<path fill="none" stroke="black" d="M146.5,-306.98C146.5,-292.87 146.5,-278.31 146.5,-266.3"></path>
+<polygon fill="black" stroke="black" points="150,-266.07 146.5,-256.07 143,-266.07 150,-266.07"></polygon>
+</a>
+</g>
+<g id="a_edge1-label"><a xlink:title="1026.63kB">
+<text text-anchor="middle" x="187.5" y="-277.8" font-family="Times,serif" font-size="14.00"> 1026.63kB</text>
+</a>
+</g>
+</g>
+<!-- N6 -->
+<g id="node6" class="node">
+<title>N6</title>
+<g id="a_node6"><a xlink:title="compress/flate.(*dictDecoder).init (528.17kB)">
+<polygon fill="#edded5" stroke="#b24300" points="348.5,-183 138.5,-183 138.5,-87 348.5,-87 348.5,-183"></polygon>
+<text text-anchor="middle" x="243.5" y="-163" font-family="Times,serif" font-size="20.00">flate</text>
+<text text-anchor="middle" x="243.5" y="-141" font-family="Times,serif" font-size="20.00">(*dictDecoder)</text>
+<text text-anchor="middle" x="243.5" y="-119" font-family="Times,serif" font-size="20.00">init</text>
+<text text-anchor="middle" x="243.5" y="-97" font-family="Times,serif" font-size="20.00">528.17kB (20.47%)</text>
+</a>
+</g>
+</g>
+<!-- N1&#45;&gt;N6 -->
+<g id="edge14" class="edge">
+<title>N1-&gt;N6</title>
+<g id="a_edge14"><a xlink:title="compress/flate.NewReader -&gt; compress/flate.(*dictDecoder).init (528.17kB)">
+<path fill="none" stroke="#b24300" stroke-width="2" d="M218.1,-306.57C222.48,-301.03 226.37,-295.16 229.5,-289 244.31,-259.86 248.15,-223.56 248.13,-193.63"></path>
+<polygon fill="#b24300" stroke="#b24300" stroke-width="2" points="251.62,-193.27 247.97,-183.33 244.63,-193.38 251.62,-193.27"></polygon>
+</a>
+</g>
+<g id="a_edge14-label"><a xlink:title="compress/flate.NewReader -&gt; compress/flate.(*dictDecoder).init (528.17kB)">
+<text text-anchor="middle" x="284" y="-241.8" font-family="Times,serif" font-size="14.00"> 528.17kB</text>
+<text text-anchor="middle" x="284" y="-226.8" font-family="Times,serif" font-size="14.00"> (inline)</text>
+</a>
+</g>
+</g>
+<!-- N2 -->
+<g id="node2" class="node">
+<title>N2</title>
+<g id="a_node2"><a xlink:title="runtime.allocm (1026kB)">
+<polygon fill="#eddbd5" stroke="#b22b00" points="574.5,-406 350.5,-406 350.5,-320 574.5,-320 574.5,-406"></polygon>
+<text text-anchor="middle" x="462.5" y="-382.8" font-family="Times,serif" font-size="24.00">runtime</text>
+<text text-anchor="middle" x="462.5" y="-356.8" font-family="Times,serif" font-size="24.00">allocm</text>
+<text text-anchor="middle" x="462.5" y="-330.8" font-family="Times,serif" font-size="24.00">1026kB (39.76%)</text>
+</a>
+</g>
+</g>
+<!-- NN2_0 -->
+<g id="NN2_0" class="node">
+<title>NN2_0</title>
+<g id="a_NN2_0"><a xlink:title="1026kB">
+<polygon fill="#f8f8f8" stroke="black" points="489.5,-256 439.5,-256 435.5,-252 435.5,-220 485.5,-220 489.5,-224 489.5,-256"></polygon>
+<polyline fill="none" stroke="black" points="485.5,-252 435.5,-252 "></polyline>
+<polyline fill="none" stroke="black" points="485.5,-252 485.5,-220 "></polyline>
+<polyline fill="none" stroke="black" points="485.5,-252 489.5,-256 "></polyline>
+<text text-anchor="middle" x="462.5" y="-236.1" font-family="Times,serif" font-size="8.00">2kB</text>
+</a>
+</g>
+</g>
+<!-- N2&#45;&gt;NN2_0 -->
+<g id="edge2" class="edge">
+<title>N2-&gt;NN2_0</title>
+<g id="a_edge2"><a xlink:title="1026kB">
+<path fill="none" stroke="black" d="M462.5,-319.67C462.5,-301.94 462.5,-281.85 462.5,-266.15"></path>
+<polygon fill="black" stroke="black" points="466,-266.07 462.5,-256.07 459,-266.07 466,-266.07"></polygon>
+</a>
+</g>
+<g id="a_edge2-label"><a xlink:title="1026kB">
+<text text-anchor="middle" x="492.5" y="-277.8" font-family="Times,serif" font-size="14.00"> 1026kB</text>
+</a>
+</g>
+</g>
+<!-- N3 -->
+<g id="node3" class="node">
+<title>N3</title>
+<g id="a_node3"><a xlink:title="runtime.main (1554.79kB)">
+<polygon fill="#edd8d5" stroke="#b21900" points="205,-1162 88,-1162 88,-1126 205,-1126 205,-1162"></polygon>
+<text text-anchor="middle" x="146.5" y="-1151.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="146.5" y="-1142.1" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="146.5" y="-1133.1" font-family="Times,serif" font-size="8.00">0 of 1554.79kB (60.24%)</text>
+</a>
+</g>
+</g>
+<!-- N5 -->
+<g id="node5" class="node">
+<title>N5</title>
+<g id="a_node5"><a xlink:title="main.main (1554.79kB)">
+<polygon fill="#edd8d5" stroke="#b21900" points="205,-1075 88,-1075 88,-1039 205,-1039 205,-1075"></polygon>
+<text text-anchor="middle" x="146.5" y="-1064.1" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="146.5" y="-1055.1" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="146.5" y="-1046.1" font-family="Times,serif" font-size="8.00">0 of 1554.79kB (60.24%)</text>
+</a>
+</g>
+</g>
+<!-- N3&#45;&gt;N5 -->
+<g id="edge7" class="edge">
+<title>N3-&gt;N5</title>
+<g id="a_edge7"><a xlink:title="runtime.main -&gt; main.main (1554.79kB)">
+<path fill="none" stroke="#b21900" stroke-width="4" d="M146.5,-1125.8C146.5,-1114.16 146.5,-1098.55 146.5,-1085.24"></path>
+<polygon fill="#b21900" stroke="#b21900" stroke-width="4" points="150,-1085.18 146.5,-1075.18 143,-1085.18 150,-1085.18"></polygon>
+</a>
+</g>
+<g id="a_edge7-label"><a xlink:title="runtime.main -&gt; main.main (1554.79kB)">
+<text text-anchor="middle" x="187.5" y="-1096.8" font-family="Times,serif" font-size="14.00"> 1554.79kB</text>
+</a>
+</g>
+</g>
+<!-- N4 -->
+<g id="node4" class="node">
+<title>N4</title>
+<g id="a_node4"><a xlink:title="compress/zlib.NewReader (1554.79kB)">
+<polygon fill="#edd8d5" stroke="#b21900" points="205,-688 88,-688 88,-652 205,-652 205,-688"></polygon>
+<text text-anchor="middle" x="146.5" y="-677.1" font-family="Times,serif" font-size="8.00">zlib</text>
+<text text-anchor="middle" x="146.5" y="-668.1" font-family="Times,serif" font-size="8.00">NewReader</text>
+<text text-anchor="middle" x="146.5" y="-659.1" font-family="Times,serif" font-size="8.00">0 of 1554.79kB (60.24%)</text>
+</a>
+</g>
+</g>
+<!-- N11 -->
+<g id="node11" class="node">
+<title>N11</title>
+<g id="a_node11"><a xlink:title="compress/zlib.NewReaderDict (1554.79kB)">
+<polygon fill="#edd8d5" stroke="#b21900" points="205,-601 88,-601 88,-565 205,-565 205,-601"></polygon>
+<text text-anchor="middle" x="146.5" y="-590.1" font-family="Times,serif" font-size="8.00">zlib</text>
+<text text-anchor="middle" x="146.5" y="-581.1" font-family="Times,serif" font-size="8.00">NewReaderDict</text>
+<text text-anchor="middle" x="146.5" y="-572.1" font-family="Times,serif" font-size="8.00">0 of 1554.79kB (60.24%)</text>
+</a>
+</g>
+</g>
+<!-- N4&#45;&gt;N11 -->
+<g id="edge5" class="edge">
+<title>N4-&gt;N11</title>
+<g id="a_edge5"><a xlink:title="compress/zlib.NewReader -&gt; compress/zlib.NewReaderDict (1554.79kB)">
+<path fill="none" stroke="#b21900" stroke-width="4" d="M146.5,-651.8C146.5,-640.16 146.5,-624.55 146.5,-611.24"></path>
+<polygon fill="#b21900" stroke="#b21900" stroke-width="4" points="150,-611.18 146.5,-601.18 143,-611.18 150,-611.18"></polygon>
+</a>
+</g>
+<g id="a_edge5-label"><a xlink:title="compress/zlib.NewReader -&gt; compress/zlib.NewReaderDict (1554.79kB)">
+<text text-anchor="middle" x="187.5" y="-622.8" font-family="Times,serif" font-size="14.00"> 1554.79kB</text>
+</a>
+</g>
+</g>
+<!-- N5&#45;&gt;N4 -->
+<g id="edge8" class="edge">
+<title>N5-&gt;N4</title>
+<g id="a_edge8"><a xlink:title="main.main -&gt; compress/zlib.NewReader (1026.63kB)">
+<path fill="none" stroke="#b22b00" stroke-width="2" d="M146.5,-1038.94C146.5,-1021.02 146.5,-992.03 146.5,-967 146.5,-967 146.5,-967 146.5,-775 146.5,-749.02 146.5,-719.38 146.5,-698.41"></path>
+<polygon fill="#b22b00" stroke="#b22b00" stroke-width="2" points="150,-698.3 146.5,-688.3 143,-698.3 150,-698.3"></polygon>
+</a>
+</g>
+<g id="a_edge8-label"><a xlink:title="main.main -&gt; compress/zlib.NewReader (1026.63kB)">
+<text text-anchor="middle" x="187.5" y="-874.8" font-family="Times,serif" font-size="14.00"> 1026.63kB</text>
+<text text-anchor="middle" x="187.5" y="-859.8" font-family="Times,serif" font-size="14.00"> (inline)</text>
+</a>
+</g>
+</g>
+<!-- N14 -->
+<g id="node14" class="node">
+<title>N14</title>
+<g id="a_node14"><a xlink:title="main.(*objectBuilder).resolveObject (528.17kB)">
+<polygon fill="#edded5" stroke="#b24300" points="322.5,-988 210.5,-988 210.5,-944 322.5,-944 322.5,-988"></polygon>
+<text text-anchor="middle" x="266.5" y="-977.6" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="266.5" y="-968.6" font-family="Times,serif" font-size="8.00">(*objectBuilder)</text>
+<text text-anchor="middle" x="266.5" y="-959.6" font-family="Times,serif" font-size="8.00">resolveObject</text>
+<text text-anchor="middle" x="266.5" y="-950.6" font-family="Times,serif" font-size="8.00">0 of 528.17kB (20.47%)</text>
+</a>
+</g>
+</g>
+<!-- N5&#45;&gt;N14 -->
+<g id="edge18" class="edge">
+<title>N5-&gt;N14</title>
+<g id="a_edge18"><a xlink:title="main.main -&gt; main.(*objectBuilder).resolveObject (528.17kB)">
+<path fill="none" stroke="#b24300" stroke-width="2" d="M169.64,-1038.84C186.68,-1026.2 210.2,-1008.75 229.8,-994.22"></path>
+<polygon fill="#b24300" stroke="#b24300" stroke-width="2" points="231.98,-996.96 237.93,-988.19 227.81,-991.34 231.98,-996.96"></polygon>
+</a>
+</g>
+<g id="a_edge18-label"><a xlink:title="main.main -&gt; main.(*objectBuilder).resolveObject (528.17kB)">
+<text text-anchor="middle" x="251" y="-1009.8" font-family="Times,serif" font-size="14.00"> 528.17kB</text>
+</a>
+</g>
+</g>
+<!-- NN6_0 -->
+<g id="NN6_0" class="node">
+<title>NN6_0</title>
+<g id="a_NN6_0"><a xlink:title="528.17kB">
+<polygon fill="#f8f8f8" stroke="black" points="270.5,-36 220.5,-36 216.5,-32 216.5,0 266.5,0 270.5,-4 270.5,-36"></polygon>
+<polyline fill="none" stroke="black" points="266.5,-32 216.5,-32 "></polyline>
+<polyline fill="none" stroke="black" points="266.5,-32 266.5,0 "></polyline>
+<polyline fill="none" stroke="black" points="266.5,-32 270.5,-36 "></polyline>
+<text text-anchor="middle" x="243.5" y="-16.1" font-family="Times,serif" font-size="8.00">32kB</text>
+</a>
+</g>
+</g>
+<!-- N6&#45;&gt;NN6_0 -->
+<g id="edge3" class="edge">
+<title>N6-&gt;NN6_0</title>
+<g id="a_edge3"><a xlink:title="528.17kB">
+<path fill="none" stroke="black" d="M243.5,-86.89C243.5,-73.12 243.5,-58.53 243.5,-46.41"></path>
+<polygon fill="black" stroke="black" points="247,-46.08 243.5,-36.08 240,-46.08 247,-46.08"></polygon>
+</a>
+</g>
+<g id="a_edge3-label"><a xlink:title="528.17kB">
+<text text-anchor="middle" x="280" y="-57.8" font-family="Times,serif" font-size="14.00"> 528.17kB</text>
+</a>
+</g>
+</g>
+<!-- N7 -->
+<g id="node7" class="node">
+<title>N7</title>
+<g id="a_node7"><a xlink:title="runtime.schedule (1026kB)">
+<polygon fill="#eddbd5" stroke="#b22b00" points="514.5,-889 410.5,-889 410.5,-853 514.5,-853 514.5,-889"></polygon>
+<text text-anchor="middle" x="462.5" y="-878.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="462.5" y="-869.1" font-family="Times,serif" font-size="8.00">schedule</text>
+<text text-anchor="middle" x="462.5" y="-860.1" font-family="Times,serif" font-size="8.00">0 of 1026kB (39.76%)</text>
+</a>
+</g>
+</g>
+<!-- N19 -->
+<g id="node19" class="node">
+<title>N19</title>
+<g id="a_node19"><a xlink:title="runtime.resetspinning (1026kB)">
+<polygon fill="#eddbd5" stroke="#b22b00" points="514.5,-794 410.5,-794 410.5,-758 514.5,-758 514.5,-794"></polygon>
+<text text-anchor="middle" x="462.5" y="-783.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="462.5" y="-774.1" font-family="Times,serif" font-size="8.00">resetspinning</text>
+<text text-anchor="middle" x="462.5" y="-765.1" font-family="Times,serif" font-size="8.00">0 of 1026kB (39.76%)</text>
+</a>
+</g>
+</g>
+<!-- N7&#45;&gt;N19 -->
+<g id="edge11" class="edge">
+<title>N7-&gt;N19</title>
+<g id="a_edge11"><a xlink:title="runtime.schedule -&gt; runtime.resetspinning (1026kB)">
+<path fill="none" stroke="#b22b00" stroke-width="2" d="M462.5,-852.94C462.5,-839.39 462.5,-820.18 462.5,-804.47"></path>
+<polygon fill="#b22b00" stroke="#b22b00" stroke-width="2" points="466,-804.26 462.5,-794.26 459,-804.26 466,-804.26"></polygon>
+</a>
+</g>
+<g id="a_edge11-label"><a xlink:title="runtime.schedule -&gt; runtime.resetspinning (1026kB)">
+<text text-anchor="middle" x="492.5" y="-819.8" font-family="Times,serif" font-size="14.00"> 1026kB</text>
+</a>
+</g>
+</g>
+<!-- N8 -->
+<g id="node8" class="node">
+<title>N8</title>
+<g id="a_node8"><a xlink:title="runtime.mcall (513kB)">
+<polygon fill="#edded5" stroke="#b24501" points="557,-1075 458,-1075 458,-1039 557,-1039 557,-1075"></polygon>
+<text text-anchor="middle" x="507.5" y="-1064.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="507.5" y="-1055.1" font-family="Times,serif" font-size="8.00">mcall</text>
+<text text-anchor="middle" x="507.5" y="-1046.1" font-family="Times,serif" font-size="8.00">0 of 513kB (19.88%)</text>
+</a>
+</g>
+</g>
+<!-- N18 -->
+<g id="node18" class="node">
+<title>N18</title>
+<g id="a_node18"><a xlink:title="runtime.park_m (513kB)">
+<polygon fill="#edded5" stroke="#b24501" points="557,-984 458,-984 458,-948 557,-948 557,-984"></polygon>
+<text text-anchor="middle" x="507.5" y="-973.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="507.5" y="-964.1" font-family="Times,serif" font-size="8.00">park_m</text>
+<text text-anchor="middle" x="507.5" y="-955.1" font-family="Times,serif" font-size="8.00">0 of 513kB (19.88%)</text>
+</a>
+</g>
+</g>
+<!-- N8&#45;&gt;N18 -->
+<g id="edge19" class="edge">
+<title>N8-&gt;N18</title>
+<g id="a_edge19"><a xlink:title="runtime.mcall -&gt; runtime.park_m (513kB)">
+<path fill="none" stroke="#b24501" d="M507.5,-1038.84C507.5,-1026.28 507.5,-1008.98 507.5,-994.5"></path>
+<polygon fill="#b24501" stroke="#b24501" points="511,-994.11 507.5,-984.11 504,-994.11 511,-994.11"></polygon>
+</a>
+</g>
+<g id="a_edge19-label"><a xlink:title="runtime.mcall -&gt; runtime.park_m (513kB)">
+<text text-anchor="middle" x="533" y="-1009.8" font-family="Times,serif" font-size="14.00"> 513kB</text>
+</a>
+</g>
+</g>
+<!-- N9 -->
+<g id="node9" class="node">
+<title>N9</title>
+<g id="a_node9"><a xlink:title="runtime.mstart (513kB)">
+<polygon fill="#edded5" stroke="#b24501" points="440,-1162 341,-1162 341,-1126 440,-1126 440,-1162"></polygon>
+<text text-anchor="middle" x="390.5" y="-1151.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="390.5" y="-1142.1" font-family="Times,serif" font-size="8.00">mstart</text>
+<text text-anchor="middle" x="390.5" y="-1133.1" font-family="Times,serif" font-size="8.00">0 of 513kB (19.88%)</text>
+</a>
+</g>
+</g>
+<!-- N15 -->
+<g id="node15" class="node">
+<title>N15</title>
+<g id="a_node15"><a xlink:title="runtime.mstart0 (513kB)">
+<polygon fill="#edded5" stroke="#b24501" points="440,-1075 341,-1075 341,-1039 440,-1039 440,-1075"></polygon>
+<text text-anchor="middle" x="390.5" y="-1064.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="390.5" y="-1055.1" font-family="Times,serif" font-size="8.00">mstart0</text>
+<text text-anchor="middle" x="390.5" y="-1046.1" font-family="Times,serif" font-size="8.00">0 of 513kB (19.88%)</text>
+</a>
+</g>
+</g>
+<!-- N9&#45;&gt;N15 -->
+<g id="edge20" class="edge">
+<title>N9-&gt;N15</title>
+<g id="a_edge20"><a xlink:title="runtime.mstart -&gt; runtime.mstart0 (513kB)">
+<path fill="none" stroke="#b24501" d="M390.5,-1125.8C390.5,-1114.16 390.5,-1098.55 390.5,-1085.24"></path>
+<polygon fill="#b24501" stroke="#b24501" points="394,-1085.18 390.5,-1075.18 387,-1085.18 394,-1085.18"></polygon>
+</a>
+</g>
+<g id="a_edge20-label"><a xlink:title="runtime.mstart -&gt; runtime.mstart0 (513kB)">
+<text text-anchor="middle" x="416" y="-1096.8" font-family="Times,serif" font-size="14.00"> 513kB</text>
+</a>
+</g>
+</g>
+<!-- N10 -->
+<g id="node10" class="node">
+<title>N10</title>
+<g id="a_node10"><a xlink:title="compress/zlib.(*reader).Reset (1554.79kB)">
+<polygon fill="#edd8d5" stroke="#b21900" points="205,-514 88,-514 88,-470 205,-470 205,-514"></polygon>
+<text text-anchor="middle" x="146.5" y="-503.6" font-family="Times,serif" font-size="8.00">zlib</text>
+<text text-anchor="middle" x="146.5" y="-494.6" font-family="Times,serif" font-size="8.00">(*reader)</text>
+<text text-anchor="middle" x="146.5" y="-485.6" font-family="Times,serif" font-size="8.00">Reset</text>
+<text text-anchor="middle" x="146.5" y="-476.6" font-family="Times,serif" font-size="8.00">0 of 1554.79kB (60.24%)</text>
+</a>
+</g>
+</g>
+<!-- N10&#45;&gt;N1 -->
+<g id="edge4" class="edge">
+<title>N10-&gt;N1</title>
+<g id="a_edge4"><a xlink:title="compress/zlib.(*reader).Reset -&gt; compress/flate.NewReader (1554.79kB)">
+<path fill="none" stroke="#b21900" stroke-width="4" d="M146.5,-469.74C146.5,-458.44 146.5,-443.87 146.5,-429.18"></path>
+<polygon fill="#b21900" stroke="#b21900" stroke-width="4" points="150,-429.03 146.5,-419.03 143,-429.03 150,-429.03"></polygon>
+</a>
+</g>
+<g id="a_edge4-label"><a xlink:title="compress/zlib.(*reader).Reset -&gt; compress/flate.NewReader (1554.79kB)">
+<text text-anchor="middle" x="187.5" y="-440.8" font-family="Times,serif" font-size="14.00"> 1554.79kB</text>
+</a>
+</g>
+</g>
+<!-- N11&#45;&gt;N10 -->
+<g id="edge6" class="edge">
+<title>N11-&gt;N10</title>
+<g id="a_edge6"><a xlink:title="compress/zlib.NewReaderDict -&gt; compress/zlib.(*reader).Reset (1554.79kB)">
+<path fill="none" stroke="#b21900" stroke-width="4" d="M146.5,-564.84C146.5,-553.44 146.5,-538.13 146.5,-524.58"></path>
+<polygon fill="#b21900" stroke="#b21900" stroke-width="4" points="150,-524.19 146.5,-514.19 143,-524.19 150,-524.19"></polygon>
+</a>
+</g>
+<g id="a_edge6-label"><a xlink:title="compress/zlib.NewReaderDict -&gt; compress/zlib.(*reader).Reset (1554.79kB)">
+<text text-anchor="middle" x="187.5" y="-535.8" font-family="Times,serif" font-size="14.00"> 1554.79kB</text>
+</a>
+</g>
+</g>
+<!-- N12 -->
+<g id="node12" class="node">
+<title>N12</title>
+<g id="a_node12"><a xlink:title="main.(*objectBuilder).buildObject (528.17kB)">
+<polygon fill="#edded5" stroke="#b24300" points="358.5,-893 246.5,-893 246.5,-849 358.5,-849 358.5,-893"></polygon>
+<text text-anchor="middle" x="302.5" y="-882.6" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="302.5" y="-873.6" font-family="Times,serif" font-size="8.00">(*objectBuilder)</text>
+<text text-anchor="middle" x="302.5" y="-864.6" font-family="Times,serif" font-size="8.00">buildObject</text>
+<text text-anchor="middle" x="302.5" y="-855.6" font-family="Times,serif" font-size="8.00">0 of 528.17kB (20.47%)</text>
+</a>
+</g>
+</g>
+<!-- N13 -->
+<g id="node13" class="node">
+<title>N13</title>
+<g id="a_node13"><a xlink:title="main.(*objectBuilder).readObjectData (528.17kB)">
+<polygon fill="#edded5" stroke="#b24300" points="304.5,-798 192.5,-798 192.5,-754 304.5,-754 304.5,-798"></polygon>
+<text text-anchor="middle" x="248.5" y="-787.6" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="248.5" y="-778.6" font-family="Times,serif" font-size="8.00">(*objectBuilder)</text>
+<text text-anchor="middle" x="248.5" y="-769.6" font-family="Times,serif" font-size="8.00">readObjectData</text>
+<text text-anchor="middle" x="248.5" y="-760.6" font-family="Times,serif" font-size="8.00">0 of 528.17kB (20.47%)</text>
+</a>
+</g>
+</g>
+<!-- N12&#45;&gt;N13 -->
+<g id="edge15" class="edge">
+<title>N12-&gt;N13</title>
+<g id="a_edge15"><a xlink:title="main.(*objectBuilder).buildObject -&gt; main.(*objectBuilder).readObjectData (528.17kB)">
+<path fill="none" stroke="#b24300" stroke-width="2" d="M290.25,-848.9C283.07,-836.53 273.88,-820.71 265.95,-807.06"></path>
+<polygon fill="#b24300" stroke="#b24300" stroke-width="2" points="268.75,-804.91 260.7,-798.02 262.7,-808.43 268.75,-804.91"></polygon>
+</a>
+</g>
+<g id="a_edge15-label"><a xlink:title="main.(*objectBuilder).buildObject -&gt; main.(*objectBuilder).readObjectData (528.17kB)">
+<text text-anchor="middle" x="316" y="-819.8" font-family="Times,serif" font-size="14.00"> 528.17kB</text>
+</a>
+</g>
+</g>
+<!-- N13&#45;&gt;N4 -->
+<g id="edge16" class="edge">
+<title>N13-&gt;N4</title>
+<g id="a_edge16"><a xlink:title="main.(*objectBuilder).readObjectData -&gt; compress/zlib.NewReader (528.17kB)">
+<path fill="none" stroke="#b24300" stroke-width="2" d="M227.86,-753.95C211.25,-737.02 187.9,-713.21 170.47,-695.44"></path>
+<polygon fill="#b24300" stroke="#b24300" stroke-width="2" points="172.9,-692.92 163.4,-688.23 167.9,-697.82 172.9,-692.92"></polygon>
+</a>
+</g>
+<g id="a_edge16-label"><a xlink:title="main.(*objectBuilder).readObjectData -&gt; compress/zlib.NewReader (528.17kB)">
+<text text-anchor="middle" x="247" y="-724.8" font-family="Times,serif" font-size="14.00"> 528.17kB</text>
+<text text-anchor="middle" x="247" y="-709.8" font-family="Times,serif" font-size="14.00"> (inline)</text>
+</a>
+</g>
+</g>
+<!-- N14&#45;&gt;N12 -->
+<g id="edge17" class="edge">
+<title>N14-&gt;N12</title>
+<g id="a_edge17"><a xlink:title="main.(*objectBuilder).resolveObject -&gt; main.(*objectBuilder).buildObject (528.17kB)">
+<path fill="none" stroke="#b24300" stroke-width="2" d="M274.67,-943.9C279.41,-931.65 285.46,-916.01 290.71,-902.45"></path>
+<polygon fill="#b24300" stroke="#b24300" stroke-width="2" points="294.02,-903.61 294.36,-893.02 287.49,-901.08 294.02,-903.61"></polygon>
+</a>
+</g>
+<g id="a_edge17-label"><a xlink:title="main.(*objectBuilder).resolveObject -&gt; main.(*objectBuilder).buildObject (528.17kB)">
+<text text-anchor="middle" x="324" y="-914.8" font-family="Times,serif" font-size="14.00"> 528.17kB</text>
+</a>
+</g>
+</g>
+<!-- N16 -->
+<g id="node16" class="node">
+<title>N16</title>
+<g id="a_node16"><a xlink:title="runtime.mstart1 (513kB)">
+<polygon fill="#edded5" stroke="#b24501" points="440,-984 341,-984 341,-948 440,-948 440,-984"></polygon>
+<text text-anchor="middle" x="390.5" y="-973.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="390.5" y="-964.1" font-family="Times,serif" font-size="8.00">mstart1</text>
+<text text-anchor="middle" x="390.5" y="-955.1" font-family="Times,serif" font-size="8.00">0 of 513kB (19.88%)</text>
+</a>
+</g>
+</g>
+<!-- N15&#45;&gt;N16 -->
+<g id="edge21" class="edge">
+<title>N15-&gt;N16</title>
+<g id="a_edge21"><a xlink:title="runtime.mstart0 -&gt; runtime.mstart1 (513kB)">
+<path fill="none" stroke="#b24501" d="M390.5,-1038.84C390.5,-1026.28 390.5,-1008.98 390.5,-994.5"></path>
+<polygon fill="#b24501" stroke="#b24501" points="394,-994.11 390.5,-984.11 387,-994.11 394,-994.11"></polygon>
+</a>
+</g>
+<g id="a_edge21-label"><a xlink:title="runtime.mstart0 -&gt; runtime.mstart1 (513kB)">
+<text text-anchor="middle" x="416" y="-1009.8" font-family="Times,serif" font-size="14.00"> 513kB</text>
+</a>
+</g>
+</g>
+<!-- N16&#45;&gt;N7 -->
+<g id="edge22" class="edge">
+<title>N16-&gt;N7</title>
+<g id="a_edge22"><a xlink:title="runtime.mstart1 -&gt; runtime.schedule (513kB)">
+<path fill="none" stroke="#b24501" d="M401.61,-947.57C408.68,-936.78 418.23,-922.79 427.5,-911 431.25,-906.23 435.41,-901.31 439.53,-896.63"></path>
+<polygon fill="#b24501" stroke="#b24501" points="442.25,-898.83 446.32,-889.05 437.04,-894.16 442.25,-898.83"></polygon>
+</a>
+</g>
+<g id="a_edge22-label"><a xlink:title="runtime.mstart1 -&gt; runtime.schedule (513kB)">
+<text text-anchor="middle" x="453" y="-914.8" font-family="Times,serif" font-size="14.00"> 513kB</text>
+</a>
+</g>
+</g>
+<!-- N17 -->
+<g id="node17" class="node">
+<title>N17</title>
+<g id="a_node17"><a xlink:title="runtime.newm (1026kB)">
+<polygon fill="#eddbd5" stroke="#b22b00" points="514.5,-510 410.5,-510 410.5,-474 514.5,-474 514.5,-510"></polygon>
+<text text-anchor="middle" x="462.5" y="-499.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="462.5" y="-490.1" font-family="Times,serif" font-size="8.00">newm</text>
+<text text-anchor="middle" x="462.5" y="-481.1" font-family="Times,serif" font-size="8.00">0 of 1026kB (39.76%)</text>
+</a>
+</g>
+</g>
+<!-- N17&#45;&gt;N2 -->
+<g id="edge9" class="edge">
+<title>N17-&gt;N2</title>
+<g id="a_edge9"><a xlink:title="runtime.newm -&gt; runtime.allocm (1026kB)">
+<path fill="none" stroke="#b22b00" stroke-width="2" d="M462.5,-473.87C462.5,-459.1 462.5,-436.97 462.5,-416.44"></path>
+<polygon fill="#b22b00" stroke="#b22b00" stroke-width="2" points="466,-416.21 462.5,-406.21 459,-416.21 466,-416.21"></polygon>
+</a>
+</g>
+<g id="a_edge9-label"><a xlink:title="runtime.newm -&gt; runtime.allocm (1026kB)">
+<text text-anchor="middle" x="492.5" y="-440.8" font-family="Times,serif" font-size="14.00"> 1026kB</text>
+</a>
+</g>
+</g>
+<!-- N18&#45;&gt;N7 -->
+<g id="edge23" class="edge">
+<title>N18-&gt;N7</title>
+<g id="a_edge23"><a xlink:title="runtime.park_m -&gt; runtime.schedule (513kB)">
+<path fill="none" stroke="#b24501" d="M499.25,-947.94C492.56,-934.13 483.03,-914.44 475.35,-898.57"></path>
+<polygon fill="#b24501" stroke="#b24501" points="478.36,-896.74 470.85,-889.26 472.06,-899.79 478.36,-896.74"></polygon>
+</a>
+</g>
+<g id="a_edge23-label"><a xlink:title="runtime.park_m -&gt; runtime.schedule (513kB)">
+<text text-anchor="middle" x="514" y="-914.8" font-family="Times,serif" font-size="14.00"> 513kB</text>
+</a>
+</g>
+</g>
+<!-- N21 -->
+<g id="node21" class="node">
+<title>N21</title>
+<g id="a_node21"><a xlink:title="runtime.wakep (1026kB)">
+<polygon fill="#eddbd5" stroke="#b22b00" points="514.5,-688 410.5,-688 410.5,-652 514.5,-652 514.5,-688"></polygon>
+<text text-anchor="middle" x="462.5" y="-677.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="462.5" y="-668.1" font-family="Times,serif" font-size="8.00">wakep</text>
+<text text-anchor="middle" x="462.5" y="-659.1" font-family="Times,serif" font-size="8.00">0 of 1026kB (39.76%)</text>
+</a>
+</g>
+</g>
+<!-- N19&#45;&gt;N21 -->
+<g id="edge10" class="edge">
+<title>N19-&gt;N21</title>
+<g id="a_edge10"><a xlink:title="runtime.resetspinning -&gt; runtime.wakep (1026kB)">
+<path fill="none" stroke="#b22b00" stroke-width="2" d="M462.5,-757.83C462.5,-741.64 462.5,-717.13 462.5,-698.27"></path>
+<polygon fill="#b22b00" stroke="#b22b00" stroke-width="2" points="466,-698.2 462.5,-688.2 459,-698.2 466,-698.2"></polygon>
+</a>
+</g>
+<g id="a_edge10-label"><a xlink:title="runtime.resetspinning -&gt; runtime.wakep (1026kB)">
+<text text-anchor="middle" x="492.5" y="-717.3" font-family="Times,serif" font-size="14.00"> 1026kB</text>
+</a>
+</g>
+</g>
+<!-- N20 -->
+<g id="node20" class="node">
+<title>N20</title>
+<g id="a_node20"><a xlink:title="runtime.startm (1026kB)">
+<polygon fill="#eddbd5" stroke="#b22b00" points="514.5,-601 410.5,-601 410.5,-565 514.5,-565 514.5,-601"></polygon>
+<text text-anchor="middle" x="462.5" y="-590.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="462.5" y="-581.1" font-family="Times,serif" font-size="8.00">startm</text>
+<text text-anchor="middle" x="462.5" y="-572.1" font-family="Times,serif" font-size="8.00">0 of 1026kB (39.76%)</text>
+</a>
+</g>
+</g>
+<!-- N20&#45;&gt;N17 -->
+<g id="edge12" class="edge">
+<title>N20-&gt;N17</title>
+<g id="a_edge12"><a xlink:title="runtime.startm -&gt; runtime.newm (1026kB)">
+<path fill="none" stroke="#b22b00" stroke-width="2" d="M462.5,-564.84C462.5,-552.28 462.5,-534.98 462.5,-520.5"></path>
+<polygon fill="#b22b00" stroke="#b22b00" stroke-width="2" points="466,-520.11 462.5,-510.11 459,-520.11 466,-520.11"></polygon>
+</a>
+</g>
+<g id="a_edge12-label"><a xlink:title="runtime.startm -&gt; runtime.newm (1026kB)">
+<text text-anchor="middle" x="492.5" y="-535.8" font-family="Times,serif" font-size="14.00"> 1026kB</text>
+</a>
+</g>
+</g>
+<!-- N21&#45;&gt;N20 -->
+<g id="edge13" class="edge">
+<title>N21-&gt;N20</title>
+<g id="a_edge13"><a xlink:title="runtime.wakep -&gt; runtime.startm (1026kB)">
+<path fill="none" stroke="#b22b00" stroke-width="2" d="M462.5,-651.8C462.5,-640.16 462.5,-624.55 462.5,-611.24"></path>
+<polygon fill="#b22b00" stroke="#b22b00" stroke-width="2" points="466,-611.18 462.5,-601.18 459,-611.18 466,-611.18"></polygon>
+</a>
+</g>
+<g id="a_edge13-label"><a xlink:title="runtime.wakep -&gt; runtime.startm (1026kB)">
+<text text-anchor="middle" x="492.5" y="-622.8" font-family="Times,serif" font-size="14.00"> 1026kB</text>
+</a>
+</g>
+</g>
+</g>
+</svg>
+
+  </div>
+  <script>
+
+
+function initPanAndZoom(svg, clickHandler) {
+  'use strict';
+
+  
+  const IDLE = 0;
+  const MOUSEPAN = 1;
+  const TOUCHPAN = 2;
+  const TOUCHZOOM = 3;
+  let mode = IDLE;
+
+  
+  let currentScale = 1.0;
+  const initWidth = svg.viewBox.baseVal.width;
+  const initHeight = svg.viewBox.baseVal.height;
+
+  
+  let panLastX = 0;      
+  let panLastY = 0;      
+  let moved = false;     
+  let touchid = null;    
+
+  
+  let touchid2 = null;     
+  let initGap = 1.0;       
+  let initScale = 1.0;     
+  let centerPoint = null;  
+
+  
+  function toSvg(x, y) {
+    const p = svg.createSVGPoint();
+    p.x = x;
+    p.y = y;
+    let m = svg.getCTM();
+    if (m == null) m = svg.getScreenCTM(); 
+    return p.matrixTransform(m.inverse());
+  }
+
+  
+  
+  function rescale(s, u) {
+    
+    if (s < 0.2) s = 0.2;
+    if (s > 10.0) s = 10.0;
+
+    currentScale = s;
+
+    
+    
+    
+    const vb = svg.viewBox;
+    const w1 = vb.baseVal.width;
+    const w2 = initWidth / s;
+    const h1 = vb.baseVal.height;
+    const h2 = initHeight / s;
+    vb.baseVal.width = w2;
+    vb.baseVal.height = h2;
+
+    
+    
+    
+    
+    
+    
+    
+    vb.baseVal.x = u.x - (u.x - vb.baseVal.x) * (w2 / w1);
+    vb.baseVal.y = u.y - (u.y - vb.baseVal.y) * (h2 / h1);
+  }
+
+  function handleWheel(e) {
+    if (e.deltaY == 0) return;
+    
+    rescale(currentScale * (e.deltaY < 0 ? 1.1 : (1/1.1)),
+            toSvg(e.offsetX, e.offsetY));
+  }
+
+  function setMode(m) {
+    mode = m;
+    touchid = null;
+    touchid2 = null;
+  }
+
+  function panStart(x, y) {
+    moved = false;
+    panLastX = x;
+    panLastY = y;
+  }
+
+  function panMove(x, y) {
+    let dx = x - panLastX;
+    let dy = y - panLastY;
+    if (Math.abs(dx) <= 2 && Math.abs(dy) <= 2) return; 
+
+    moved = true;
+    panLastX = x;
+    panLastY = y;
+
+    
+    const swidth = svg.clientWidth || svg.parentNode.clientWidth;
+    const sheight = svg.clientHeight || svg.parentNode.clientHeight;
+
+    
+    dx *= (svg.viewBox.baseVal.width / swidth);
+    dy *= (svg.viewBox.baseVal.height / sheight);
+
+    svg.viewBox.baseVal.x -= dx;
+    svg.viewBox.baseVal.y -= dy;
+  }
+
+  function handleScanStart(e) {
+    if (e.button != 0) return; 
+    setMode(MOUSEPAN);
+    panStart(e.clientX, e.clientY);
+    e.preventDefault();
+    svg.addEventListener('mousemove', handleScanMove);
+  }
+
+  function handleScanMove(e) {
+    if (e.buttons == 0) {
+      
+      setMode(IDLE);
+      svg.removeEventListener('mousemove', handleScanMove);
+      return;
+    }
+    if (mode == MOUSEPAN) panMove(e.clientX, e.clientY);
+  }
+
+  function handleScanEnd(e) {
+    if (mode == MOUSEPAN) panMove(e.clientX, e.clientY);
+    setMode(IDLE);
+    svg.removeEventListener('mousemove', handleScanMove);
+    if (!moved) clickHandler(e.target);
+  }
+
+  
+  function findTouch(tlist, id) {
+    for (const t of tlist) {
+      if (t.identifier == id) return t;
+    }
+    return null;
+  }
+
+  
+  function touchGap(t1, t2) {
+    const dx = t1.clientX - t2.clientX;
+    const dy = t1.clientY - t2.clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  function handleTouchStart(e) {
+    if (mode == IDLE && e.changedTouches.length == 1) {
+      
+      const t = e.changedTouches[0];
+      setMode(TOUCHPAN);
+      touchid = t.identifier;
+      panStart(t.clientX, t.clientY);
+      e.preventDefault();
+    } else if (mode == TOUCHPAN && e.touches.length == 2) {
+      
+      setMode(TOUCHZOOM);
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      touchid = t1.identifier;
+      touchid2 = t2.identifier;
+      initScale = currentScale;
+      initGap = touchGap(t1, t2);
+      centerPoint = toSvg((t1.clientX + t2.clientX) / 2,
+                          (t1.clientY + t2.clientY) / 2);
+      e.preventDefault();
+    }
+  }
+
+  function handleTouchMove(e) {
+    if (mode == TOUCHPAN) {
+      const t = findTouch(e.changedTouches, touchid);
+      if (t == null) return;
+      if (e.touches.length != 1) {
+        setMode(IDLE);
+        return;
+      }
+      panMove(t.clientX, t.clientY);
+      e.preventDefault();
+    } else if (mode == TOUCHZOOM) {
+      
+      const t1 = findTouch(e.touches, touchid);
+      const t2 = findTouch(e.touches, touchid2);
+      if (t1 == null || t2 == null) return;
+      const gap = touchGap(t1, t2);
+      rescale(initScale * gap / initGap, centerPoint);
+      e.preventDefault();
+    }
+  }
+
+  function handleTouchEnd(e) {
+    if (mode == TOUCHPAN) {
+      const t = findTouch(e.changedTouches, touchid);
+      if (t == null) return;
+      panMove(t.clientX, t.clientY);
+      setMode(IDLE);
+      e.preventDefault();
+      if (!moved) clickHandler(t.target);
+    } else if (mode == TOUCHZOOM) {
+      setMode(IDLE);
+      e.preventDefault();
+    }
+  }
+
+  svg.addEventListener('mousedown', handleScanStart);
+  svg.addEventListener('mouseup', handleScanEnd);
+  svg.addEventListener('touchstart', handleTouchStart);
+  svg.addEventListener('touchmove', handleTouchMove);
+  svg.addEventListener('touchend', handleTouchEnd);
+  svg.addEventListener('wheel', handleWheel, true);
+}
+
+function initMenus() {
+  'use strict';
+
+  let activeMenu = null;
+  let activeMenuHdr = null;
+
+  function cancelActiveMenu() {
+    if (activeMenu == null) return;
+    activeMenu.style.display = 'none';
+    activeMenu = null;
+    activeMenuHdr = null;
+  }
+
+  
+  for (const menu of document.getElementsByClassName('submenu')) {
+    const hdr = menu.parentElement;
+    if (hdr == null) return;
+    if (hdr.classList.contains('disabled')) return;
+    function showMenu(e) {
+      
+      
+      if (e.target.parentElement != hdr) return;
+      activeMenu = menu;
+      activeMenuHdr = hdr;
+      menu.style.display = 'block';
+    }
+    hdr.addEventListener('mousedown', showMenu);
+    hdr.addEventListener('touchstart', showMenu);
+  }
+
+  
+  for (const t of ['mousedown', 'touchstart']) {
+    document.addEventListener(t, (e) => {
+      
+      
+      if (activeMenuHdr != e.target.closest('.menu-item')) {
+        cancelActiveMenu();
+      }
+    }, { passive: true, capture: true });
+  }
+
+  
+  document.addEventListener('mouseup', (e) => {
+    if (activeMenu == e.target.closest('.submenu')) {
+      cancelActiveMenu();
+    }
+  }, { passive: true, capture: true });
+}
+
+function sendURL(method, url, done) {
+  fetch(url.toString(), {method: method})
+      .then((response) => { done(response.ok); })
+      .catch((error) => { done(false); });
+}
+
+
+function initConfigManager() {
+  'use strict';
+
+  
+  function elem(id) {
+    const result = document.getElementById(id);
+    if (!result) console.warn('element ' + id + ' not found');
+    return result;
+  }
+  const overlay = elem('dialog-overlay');
+  const saveDialog = elem('save-dialog');
+  const saveInput = elem('save-name');
+  const saveError = elem('save-error');
+  const delDialog = elem('delete-dialog');
+  const delPrompt = elem('delete-prompt');
+  const delError = elem('delete-error');
+
+  let currentDialog = null;
+  let currentDeleteTarget = null;
+
+  function showDialog(dialog) {
+    if (currentDialog != null) {
+      overlay.style.display = 'none';
+      currentDialog.style.display = 'none';
+    }
+    currentDialog = dialog;
+    if (dialog != null) {
+      overlay.style.display = 'block';
+      dialog.style.display = 'block';
+    }
+  }
+
+  function cancelDialog(e) {
+    showDialog(null);
+  }
+
+  
+  function showSaveDialog(e) {
+    saveError.innerText = '';
+    showDialog(saveDialog);
+    saveInput.focus();
+  }
+
+  
+  function commitSave(e) {
+    const name = saveInput.value;
+    const url = new URL(document.URL);
+    
+    url.pathname = new URL('./saveconfig', document.URL).pathname;
+    url.searchParams.set('config', name);
+    saveError.innerText = '';
+    sendURL('POST', url, (ok) => {
+      if (!ok) {
+        saveError.innerText = 'Save failed';
+      } else {
+        showDialog(null);
+        location.reload();  
+      }
+    });
+  }
+
+  function handleSaveInputKey(e) {
+    if (e.key === 'Enter') commitSave(e);
+  }
+
+  function deleteConfig(e, elem) {
+    e.preventDefault();
+    const config = elem.dataset.config;
+    delPrompt.innerText = 'Delete ' + config + '?';
+    currentDeleteTarget = elem;
+    showDialog(delDialog);
+  }
+
+  function commitDelete(e, elem) {
+    if (!currentDeleteTarget) return;
+    const config = currentDeleteTarget.dataset.config;
+    const url = new URL('./deleteconfig', document.URL);
+    url.searchParams.set('config', config);
+    delError.innerText = '';
+    sendURL('DELETE', url, (ok) => {
+      if (!ok) {
+        delError.innerText = 'Delete failed';
+        return;
+      }
+      showDialog(null);
+      
+      if (currentDeleteTarget && currentDeleteTarget.parentElement) {
+        currentDeleteTarget.parentElement.remove();
+      }
+    });
+  }
+
+  
+  function bind(event, elem, fn) {
+    if (elem == null) return;
+    elem.addEventListener(event, fn);
+    if (event == 'click') {
+      
+      elem.addEventListener('touchstart', fn);
+    }
+  }
+
+  bind('click', elem('save-config'), showSaveDialog);
+  bind('click', elem('save-cancel'), cancelDialog);
+  bind('click', elem('save-confirm'), commitSave);
+  bind('keydown', saveInput, handleSaveInputKey);
+
+  bind('click', elem('delete-cancel'), cancelDialog);
+  bind('click', elem('delete-confirm'), commitDelete);
+
+  
+  for (const del of Array.from(document.getElementsByClassName('menu-delete-btn'))) {
+    bind('click', del, (e) => {
+      deleteConfig(e, del);
+    });
+  }
+}
+
+
+
+
+
+
+function viewer(baseUrl, nodes, options) {
+  'use strict';
+
+  
+  const search = document.getElementById('search');
+  const graph0 = document.getElementById('graph0');
+  const svg = (graph0 == null ? null : graph0.parentElement);
+  const toptable = document.getElementById('toptable');
+
+  let regexpActive = false;
+  let selected = new Map();
+  let origFill = new Map();
+  let searchAlarm = null;
+  let buttonsEnabled = true;
+
+  
+  function getSelection() {
+    if (selected.size > 0) {
+      return selected;
+    } else if (options && options.current) {
+      return options.current();
+    }
+    return new Map();
+  }
+
+  function handleDetails(e) {
+    e.preventDefault();
+    const detailsText = document.getElementById('detailsbox');
+    if (detailsText != null) {
+      if (detailsText.style.display === 'block') {
+        detailsText.style.display = 'none';
+      } else {
+        detailsText.style.display = 'block';
+      }
+    }
+  }
+
+  function handleKey(e) {
+    if (e.keyCode != 13) return;
+    setHrefParams(window.location, function (params) {
+      params.set('f', search.value);
+    });
+    e.preventDefault();
+  }
+
+  function handleSearch() {
+    
+    if (searchAlarm != null) {
+      clearTimeout(searchAlarm);
+    }
+    searchAlarm = setTimeout(selectMatching, 300);
+
+    regexpActive = true;
+    updateButtons();
+  }
+
+  function selectMatching() {
+    searchAlarm = null;
+    let re = null;
+    if (search.value != '') {
+      try {
+        re = new RegExp(search.value);
+      } catch (e) {
+        
+        return;
+      }
+    }
+
+    function match(text) {
+      return re != null && re.test(text);
+    }
+
+    
+    selected.forEach(function(v, n) {
+      if (!match(nodes[n])) {
+        unselect(n);
+      }
+    })
+
+    
+    if (nodes) {
+      for (let n = 0; n < nodes.length; n++) {
+        if (!selected.has(n) && match(nodes[n])) {
+          select(n);
+        }
+      }
+    }
+
+    updateButtons();
+  }
+
+  function toggleSvgSelect(elem) {
+    
+    while (elem != null && elem.parentElement != graph0) {
+      elem = elem.parentElement;
+    }
+    if (!elem) return;
+
+    
+    regexpActive = false;
+
+    const n = nodeId(elem);
+    if (n < 0) return;
+    if (selected.has(n)) {
+      unselect(n);
+    } else {
+      select(n);
+    }
+    updateButtons();
+  }
+
+  function unselect(n) {
+    if (setNodeHighlight(n, false)) selected.delete(n);
+  }
+
+  function select(n, elem) {
+    if (setNodeHighlight(n, true)) selected.set(n, true);
+  }
+
+  function nodeId(elem) {
+    const id = elem.id;
+    if (!id) return -1;
+    if (!id.startsWith('node')) return -1;
+    const n = parseInt(id.slice(4), 10);
+    if (isNaN(n)) return -1;
+    if (n < 0 || n >= nodes.length) return -1;
+    return n;
+  }
+
+  
+  function setNodeHighlight(n, set) {
+    if (options && options.hiliter) return options.hiliter(n, set);
+
+    const elem = document.getElementById('node' + n);
+    if (!elem) return false;
+
+    
+    if (elem.nodeName == 'TR') {
+      elem.classList.toggle('hilite', set);
+      return true;
+    }
+
+    
+    const p = findPolygon(elem);
+    if (p != null) {
+      if (set) {
+        origFill.set(p, p.style.fill);
+        p.style.fill = '#ccccff';
+      } else if (origFill.has(p)) {
+        p.style.fill = origFill.get(p);
+      }
+    }
+
+    return true;
+  }
+
+  function findPolygon(elem) {
+    if (elem.localName == 'polygon') return elem;
+    for (const c of elem.children) {
+      const p = findPolygon(c);
+      if (p != null) return p;
+    }
+    return null;
+  }
+
+  function setSampleIndexLink(si) {
+    const elem = document.getElementById('sampletype-' + si);
+    if (elem != null) {
+      setHrefParams(elem, function (params) {
+        params.set("si", si);
+      });
+    }
+  }
+
+  
+  
+  function makeSearchLinkDynamic(id) {
+    const elem = document.getElementById(id);
+    if (elem == null) return;
+
+    
+    
+    let param = 'f';
+    if (id == 'ignore') param = 'i';
+    if (id == 'hide') param = 'h';
+    if (id == 'show') param = 's';
+    if (id == 'show-from') param = 'sf';
+
+    
+    elem.addEventListener('mouseenter', updater);
+    elem.addEventListener('touchstart', updater);
+
+    function updater() {
+      
+      
+      let re = regexpActive
+          ? search.value
+          : Array.from(getSelection().keys()).map(key => pprofQuoteMeta(nodes[key])).join('|');
+
+      setHrefParams(elem, function (params) {
+        if (re != '') {
+          
+          if (param != 'f' && param != 's' && param != 'sf' && params.has(param)) {
+            const old = params.get(param);
+            if (old != '') {
+              re += '|' + old;
+            }
+          }
+          params.set(param, re);
+        } else {
+          params.delete(param);
+        }
+      });
+    }
+  }
+
+  function setHrefParams(elem, paramSetter) {
+    let url = new URL(elem.href);
+    url.hash = '';
+
+    
+    const params = url.searchParams;
+    for (const p of new URLSearchParams(window.location.search)) {
+      params.set(p[0], p[1]);
+    }
+
+    
+    paramSetter(params);
+
+    elem.href = url.toString();
+  }
+
+  function handleTopClick(e) {
+    
+    let elem = e.target;
+    while (elem != null && elem.nodeName != 'TR') {
+      elem = elem.parentElement;
+    }
+    if (elem == null || elem.children.length < 6) return;
+
+    e.preventDefault();
+    const tr = elem;
+    const td = elem.children[5];
+    if (td.nodeName != 'TD') return;
+    const name = td.innerText;
+    const index = nodes.indexOf(name);
+    if (index < 0) return;
+
+    
+    regexpActive = false;
+
+    if (selected.has(index)) {
+      unselect(index, elem);
+    } else {
+      select(index, elem);
+    }
+    updateButtons();
+  }
+
+  function updateButtons() {
+    const enable = (search.value != '' || getSelection().size != 0);
+    if (buttonsEnabled == enable) return;
+    buttonsEnabled = enable;
+    for (const id of ['focus', 'ignore', 'hide', 'show', 'show-from']) {
+      const link = document.getElementById(id);
+      if (link != null) {
+        link.classList.toggle('disabled', !enable);
+      }
+    }
+  }
+
+  
+  updateButtons();
+
+  
+  initMenus();
+  if (svg != null) {
+    initPanAndZoom(svg, toggleSvgSelect);
+  }
+  if (toptable != null) {
+    toptable.addEventListener('mousedown', handleTopClick);
+    toptable.addEventListener('touchstart', handleTopClick);
+  }
+
+  const ids = ['topbtn', 'graphbtn',
+               'flamegraph',
+               'peek', 'list',
+               'disasm', 'focus', 'ignore', 'hide', 'show', 'show-from'];
+  ids.forEach(makeSearchLinkDynamic);
+
+  const sampleIDs = ['alloc_objects', 'alloc_space', 'inuse_objects', 'inuse_space', ];
+  sampleIDs.forEach(setSampleIndexLink);
+
+  
+  function addAction(id, action) {
+    const btn = document.getElementById(id);
+    if (btn != null) {
+      btn.addEventListener('click', action);
+      btn.addEventListener('touchstart', action);
+    }
+  }
+
+  addAction('details', handleDetails);
+  initConfigManager();
+
+  search.addEventListener('input', handleSearch);
+  search.addEventListener('keydown', handleKey);
+
+  
+  const main = document.getElementById('bodycontainer');
+  if (main) {
+    main.focus();
+  }
+}
+
+
+function pprofQuoteMeta(str) {
+  return '^' + str.replace(/([\\\.?+*\[\](){}|^$])/g, '\\$1') + '$';
+}
+</script>
+
+  <script>viewer(new URL(window.location.href), ["","compress/flate.NewReader","runtime.allocm","runtime.main","compress/zlib.NewReader","main.main","compress/flate.(*dictDecoder).init","runtime.schedule","runtime.mcall","runtime.mstart","compress/zlib.(*reader).Reset","compress/zlib.NewReaderDict","main.(*objectBuilder).buildObject","main.(*objectBuilder).readObjectData","main.(*objectBuilder).resolveObject","runtime.mstart0","runtime.mstart1","runtime.newm","runtime.park_m","runtime.resetspinning","runtime.startm","runtime.wakep"]);</script>
+
+
+</body></html>

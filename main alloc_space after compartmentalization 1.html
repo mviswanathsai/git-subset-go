@@ -1,0 +1,1603 @@
+<!DOCTYPE html>
+<html><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <meta charset="utf-8">
+  <title>main alloc_space</title>
+  <style type="text/css">
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+html, body {
+  height: 100%;
+}
+body {
+  font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+  font-size: 13px;
+  line-height: 1.4;
+  display: flex;
+  flex-direction: column;
+}
+a {
+  color: #2a66d9;
+}
+.header {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  min-height: 44px;
+  background-color: #eee;
+  color: #212121;
+  padding: 0 1rem;
+}
+.header > div {
+  margin: 0 0.125em;
+}
+.header .title h1 {
+  font-size: 1.75em;
+  margin-right: 1rem;
+  margin-bottom: 4px;
+}
+.header .title a {
+  color: #212121;
+  text-decoration: none;
+}
+.header .title a:hover {
+  text-decoration: underline;
+}
+.header .description {
+  width: 100%;
+  text-align: right;
+  white-space: nowrap;
+}
+@media screen and (max-width: 799px) {
+  .header input {
+    display: none;
+  }
+}
+#detailsbox {
+  display: none;
+  position: fixed;
+  top: 40px;
+  right: 20px;
+  background-color: #ffffff;
+  box-shadow: 0 1px 5px rgba(0,0,0,.3);
+  line-height: 24px;
+  padding: 1em;
+  text-align: left;
+}
+.header input {
+  background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' style='pointer-events:none;display:block;width:100%25;height:100%25;fill:%23757575'%3E%3Cpath d='M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61.0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/%3E%3C/svg%3E") no-repeat 4px center/20px 20px;
+  border: 1px solid #d1d2d3;
+  border-radius: 2px 0 0 2px;
+  padding: 0.25em;
+  padding-left: 28px;
+  margin-left: 1em;
+  font-family: 'Roboto', 'Noto', sans-serif;
+  font-size: 1em;
+  line-height: 24px;
+  color: #212121;
+}
+.downArrow {
+  border-top: .36em solid #ccc;
+  border-left: .36em solid transparent;
+  border-right: .36em solid transparent;
+  margin-bottom: .05em;
+  margin-left: .5em;
+  transition: border-top-color 200ms;
+}
+.menu-item {
+  height: 100%;
+  text-transform: uppercase;
+  font-family: 'Roboto Medium', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+  position: relative;
+}
+.menu-item .menu-name:hover {
+  opacity: 0.75;
+}
+.menu-item .menu-name:hover .downArrow {
+  border-top-color: #666;
+}
+.menu-name {
+  height: 100%;
+  padding: 0 0.5em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.menu-name a {
+  text-decoration: none;
+  color: #212121;
+}
+.submenu {
+  display: none;
+  margin-top: -4px;
+  min-width: 10em;
+  position: absolute;
+  left: 0px;
+  background-color: white;
+  box-shadow: 0 1px 5px rgba(0,0,0,.3);
+  font-size: 100%;
+  text-transform: none;
+  white-space: nowrap;
+}
+.menu-item, .submenu {
+  user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  -webkit-user-select: none;
+}
+.submenu hr {
+  border: 0;
+  border-top: 2px solid #eee;
+}
+.submenu a {
+  display: block;
+  padding: .5em 1em;
+  text-decoration: none;
+}
+.submenu a:hover, .submenu a.active {
+  color: white;
+  background-color: #6b82d6;
+}
+.submenu a.disabled {
+  color: gray;
+  pointer-events: none;
+}
+.menu-check-mark {
+  position: absolute;
+  left: 2px;
+}
+.menu-delete-btn {
+  position: absolute;
+  right: 2px;
+}
+
+.help {
+  padding-left: 1em;
+}
+
+
+#dialog-overlay {
+  display: none;
+  position: fixed;
+  left: 0px;
+  top: 0px;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(1,1,1,0.1);
+}
+
+.dialog {
+  
+  display: none;
+  position: fixed;
+  margin: 0px;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 125%;
+  background-color: #ffffff;
+  box-shadow: 0 1px 5px rgba(0,0,0,.3);
+}
+.dialog-header {
+  font-size: 120%;
+  border-bottom: 1px solid #CCCCCC;
+  width: 100%;
+  text-align: center;
+  background: #EEEEEE;
+  user-select: none;
+}
+.dialog-footer {
+  border-top: 1px solid #CCCCCC;
+  width: 100%;
+  text-align: right;
+  padding: 10px;
+}
+.dialog-error {
+  margin: 10px;
+  color: red;
+}
+.dialog input {
+  margin: 10px;
+  font-size: inherit;
+}
+.dialog button {
+  margin-left: 10px;
+  font-size: inherit;
+}
+#save-dialog, #delete-dialog {
+  width: 50%;
+  max-width: 20em;
+}
+#delete-prompt {
+  padding: 10px;
+}
+
+#content {
+  overflow-y: scroll;
+  padding: 1em;
+}
+#top {
+  overflow-y: scroll;
+}
+#graph {
+  overflow: hidden;
+}
+#graph svg {
+  width: 100%;
+  height: auto;
+  padding: 10px;
+}
+#content.source .filename {
+  margin-top: 0;
+  margin-bottom: 1em;
+  font-size: 120%;
+}
+#content.source pre {
+  margin-bottom: 3em;
+}
+table {
+  border-spacing: 0px;
+  width: 100%;
+  padding-bottom: 1em;
+  white-space: nowrap;
+}
+table thead {
+  font-family: 'Roboto Medium', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+}
+table tr th {
+  position: sticky;
+  top: 0;
+  background-color: #ddd;
+  text-align: right;
+  padding: .3em .5em;
+}
+table tr td {
+  padding: .3em .5em;
+  text-align: right;
+}
+#top table tr th:nth-child(6),
+#top table tr th:nth-child(7),
+#top table tr td:nth-child(6),
+#top table tr td:nth-child(7) {
+  text-align: left;
+}
+#top table tr td:nth-child(6) {
+  width: 100%;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+#flathdr1, #flathdr2, #cumhdr1, #cumhdr2, #namehdr {
+  cursor: ns-resize;
+}
+.hilite {
+  background-color: #ebf5fb;
+  font-weight: bold;
+}
+ 
+.boxtext         { z-index: 2; }   
+#current-details { z-index: 2; }   
+#detailsbox      { z-index: 3; }   
+.submenu         { z-index: 4; }
+.dialog          { z-index: 5; }
+</style>
+
+  <style type="text/css">
+#graph {
+    cursor: grab;
+}
+
+#graph:active {
+    cursor: grabbing;
+}
+</style>
+
+</head>
+<body>
+  <div class="header">
+  <div class="title">
+    <h1><a href="http://localhost:8080/ui/">pprof</a></h1>
+  </div>
+
+  <div id="view" class="menu-item">
+    <div class="menu-name">
+      View
+      <i class="downArrow"></i>
+    </div>
+    <div class="submenu">
+      <a title="Outputs top entries in text form" href="http://localhost:8080/ui/top" id="topbtn">Top</a>
+      <a title="Display profile as a directed graph" href="http://localhost:8080/ui/" id="graphbtn">Graph</a>
+      <a title="Display profile as a flame graph" href="http://localhost:8080/ui/flamegraph" id="flamegraph">Flame Graph</a>
+      <a title="Output callers/callees of functions matching regexp" href="http://localhost:8080/ui/peek" id="peek">Peek</a>
+      <a title="Output annotated source for functions matching regexp" href="http://localhost:8080/ui/source" id="list">Source</a>
+      <a title="Output assembly listings annotated with samples" href="http://localhost:8080/ui/disasm" id="disasm">Disassemble</a>
+    </div>
+  </div>
+
+  
+  
+  <div id="sample" class="menu-item">
+    <div class="menu-name">
+      Sample
+      <i class="downArrow"></i>
+    </div>
+    <div class="submenu">
+      
+      <a href="http://localhost:8080/ui/?si=alloc_objects" id="sampletype-alloc_objects">alloc_objects</a>
+      
+      <a href="http://localhost:8080/ui/?si=alloc_space" id="sampletype-alloc_space">alloc_space</a>
+      
+      <a href="http://localhost:8080/ui/?si=inuse_objects" id="sampletype-inuse_objects">inuse_objects</a>
+      
+      <a href="http://localhost:8080/ui/?si=inuse_space" id="sampletype-inuse_space">inuse_space</a>
+      
+    </div>
+  </div>
+  
+
+  <div id="refine" class="menu-item">
+    <div class="menu-name">
+      Refine
+      <i class="downArrow"></i>
+    </div>
+    <div class="submenu">
+      <a title="Restricts to samples going through a node matching regexp
+Discard samples that do not include a node matching this regexp.
+Matching includes the function name, filename or object name.
+" href="http://localhost:8080/ui/?" id="focus" class="disabled">Focus</a>
+      <a title="Skips paths going through any nodes matching regexp
+If set, discard samples that include a node matching this regexp.
+Matching includes the function name, filename or object name.
+" href="http://localhost:8080/ui/?" id="ignore" class="disabled">Ignore</a>
+      <a title="Skips nodes matching regexp
+Discard nodes that match this location.
+Other nodes from samples that include this location will be shown.
+Matching includes the function name, filename or object name.
+" href="http://localhost:8080/ui/?" id="hide" class="disabled">Hide</a>
+      <a title="Only show nodes matching regexp
+If set, only show nodes that match this location.
+Matching includes the function name, filename or object name.
+" href="http://localhost:8080/ui/?" id="show" class="disabled">Show</a>
+      <a title="Drops functions above the highest matched frame.
+If set, all frames above the highest match are dropped from every sample.
+Matching includes the function name, filename or object name.
+" href="http://localhost:8080/ui/?" id="show-from" class="disabled">Show from</a>
+      <hr>
+      <a title="Show the entire profile" href="http://localhost:8080/ui/?">Reset</a>
+    </div>
+  </div>
+
+  <div id="config" class="menu-item">
+    <div class="menu-name">
+      Config
+      <i class="downArrow"></i>
+    </div>
+    <div class="submenu">
+      <a title="Save current settings" id="save-config">Save as ...</a>
+      <hr>
+      
+      <a href="http://localhost:8080/ui/?si=alloc_space">
+        <span class="menu-check-mark">✓</span>
+        Default
+        
+      </a>
+      
+    </div>
+  </div>
+
+  <div id="download" class="menu-item">
+    <div class="menu-name">
+      <a href="http://localhost:8080/ui/download">Download</a>
+    </div>
+  </div>
+
+  <div>
+    <input id="search" type="text" placeholder="Search regexp" autocomplete="off" autocapitalize="none" size="40">
+  </div>
+
+  <div class="description">
+    <a title="Show information about the profile and this view" href="#" id="details">main alloc_space</a>
+    <div id="detailsbox">
+      <div>File: main</div><div>Build ID: e44fade9c7adfdcdc364c5217b0ea116c0c9064a</div><div>Type: alloc_space</div><div>Time: 2025-12-30 14:51:10 IST</div><div>Showing nodes accounting for 2050.30kB, 100% of 2050.30kB total</div><div>
+See https://git.io/JfYMW for how to read the graph</div>
+    </div>
+  </div>
+
+  
+</div>
+
+<div id="dialog-overlay"></div>
+
+<div class="dialog" id="save-dialog">
+  <div class="dialog-header">Save options as</div>
+  <datalist id="config-list">
+    
+  </datalist>
+  <input id="save-name" type="text" list="config-list" placeholder="New config">
+  <div class="dialog-footer">
+    <span class="dialog-error" id="save-error"></span>
+    <button id="save-cancel">Cancel</button>
+    <button id="save-confirm">Save</button>
+  </div>
+</div>
+
+<div class="dialog" id="delete-dialog">
+  <div class="dialog-header" id="delete-dialog-title">Delete config</div>
+  <div id="delete-prompt"></div>
+  <div class="dialog-footer">
+    <span class="dialog-error" id="delete-error"></span>
+    <button id="delete-cancel">Cancel</button>
+    <button id="delete-confirm">Delete</button>
+  </div>
+</div>
+
+<div id="errors"></div>
+
+  <div id="graph">
+    <svg width="561pt" height="990pt" viewBox="-608.652 91.8819 2805 4950" xmlns="http://www.w3.org/2000/svg" xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 986)">
+<title>main</title>
+<polygon fill="white" stroke="transparent" points="-4,4 -4,-986 557,-986 557,4 -4,4"></polygon>
+<!-- N1 -->
+<g id="node1" class="node">
+<title>N1</title>
+<g id="a_node1"><a xlink:title="runtime.gcBgMarkWorker (1024.30kB)">
+<polygon fill="#edd9d5" stroke="#b22100" points="248,-982 0,-982 0,-886 248,-886 248,-982"></polygon>
+<text text-anchor="middle" x="124" y="-962" font-family="Times,serif" font-size="20.00">runtime</text>
+<text text-anchor="middle" x="124" y="-940" font-family="Times,serif" font-size="20.00">gcBgMarkWorker</text>
+<text text-anchor="middle" x="124" y="-918" font-family="Times,serif" font-size="20.00">512.25kB (24.98%)</text>
+<text text-anchor="middle" x="124" y="-896" font-family="Times,serif" font-size="20.00">of 1024.30kB (49.96%)</text>
+</a>
+</g>
+</g>
+<!-- NN1_0 -->
+<g id="NN1_0" class="node">
+<title>NN1_0</title>
+<g id="a_NN1_0"><a xlink:title="512.25kB">
+<polygon fill="#f8f8f8" stroke="black" points="151,-835 101,-835 97,-831 97,-799 147,-799 151,-803 151,-835"></polygon>
+<polyline fill="none" stroke="black" points="147,-831 97,-831 "></polyline>
+<polyline fill="none" stroke="black" points="147,-831 147,-799 "></polyline>
+<polyline fill="none" stroke="black" points="147,-831 151,-835 "></polyline>
+<text text-anchor="middle" x="124" y="-815.1" font-family="Times,serif" font-size="8.00">512B</text>
+</a>
+</g>
+</g>
+<!-- N1&#45;&gt;NN1_0 -->
+<g id="edge1" class="edge">
+<title>N1-&gt;NN1_0</title>
+<g id="a_edge1"><a xlink:title="512.25kB">
+<path fill="none" stroke="black" d="M124,-885.89C124,-872.12 124,-857.53 124,-845.41"></path>
+<polygon fill="black" stroke="black" points="127.5,-845.08 124,-835.08 120.5,-845.08 127.5,-845.08"></polygon>
+</a>
+</g>
+<g id="a_edge1-label"><a xlink:title="512.25kB">
+<text text-anchor="middle" x="160.5" y="-856.8" font-family="Times,serif" font-size="14.00"> 512.25kB</text>
+</a>
+</g>
+</g>
+<!-- N7 -->
+<g id="node7" class="node">
+<title>N7</title>
+<g id="a_node7"><a xlink:title="runtime.gcMarkDone (512.05kB)">
+<polygon fill="#edddd5" stroke="#b23c00" points="268,-748 156,-748 156,-712 268,-712 268,-748"></polygon>
+<text text-anchor="middle" x="212" y="-737.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="212" y="-728.1" font-family="Times,serif" font-size="8.00">gcMarkDone</text>
+<text text-anchor="middle" x="212" y="-719.1" font-family="Times,serif" font-size="8.00">0 of 512.05kB (24.97%)</text>
+</a>
+</g>
+</g>
+<!-- N1&#45;&gt;N7 -->
+<g id="edge14" class="edge">
+<title>N1-&gt;N7</title>
+<g id="a_edge14"><a xlink:title="runtime.gcBgMarkWorker -&gt; runtime.gcMarkDone (512.05kB)">
+<path fill="none" stroke="#b23c00" stroke-width="2" d="M186.12,-885.65C190.71,-880.13 194.79,-874.23 198,-868 215.87,-833.33 216.65,-787.2 214.86,-758.31"></path>
+<polygon fill="#b23c00" stroke="#b23c00" stroke-width="2" points="218.34,-757.84 214.08,-748.14 211.36,-758.37 218.34,-757.84"></polygon>
+</a>
+</g>
+<g id="a_edge14-label"><a xlink:title="runtime.gcBgMarkWorker -&gt; runtime.gcMarkDone (512.05kB)">
+<text text-anchor="middle" x="251.5" y="-813.3" font-family="Times,serif" font-size="14.00"> 512.05kB</text>
+</a>
+</g>
+</g>
+<!-- N2 -->
+<g id="node2" class="node">
+<title>N2</title>
+<g id="a_node2"><a xlink:title="runtime.allocm (1026kB)">
+<polygon fill="#edd9d5" stroke="#b22100" points="529,-173 305,-173 305,-87 529,-87 529,-173"></polygon>
+<text text-anchor="middle" x="417" y="-149.8" font-family="Times,serif" font-size="24.00">runtime</text>
+<text text-anchor="middle" x="417" y="-123.8" font-family="Times,serif" font-size="24.00">allocm</text>
+<text text-anchor="middle" x="417" y="-97.8" font-family="Times,serif" font-size="24.00">1026kB (50.04%)</text>
+</a>
+</g>
+</g>
+<!-- NN2_0 -->
+<g id="NN2_0" class="node">
+<title>NN2_0</title>
+<g id="a_NN2_0"><a xlink:title="1026kB">
+<polygon fill="#f8f8f8" stroke="black" points="444,-36 394,-36 390,-32 390,0 440,0 444,-4 444,-36"></polygon>
+<polyline fill="none" stroke="black" points="440,-32 390,-32 "></polyline>
+<polyline fill="none" stroke="black" points="440,-32 440,0 "></polyline>
+<polyline fill="none" stroke="black" points="440,-32 444,-36 "></polyline>
+<text text-anchor="middle" x="417" y="-16.1" font-family="Times,serif" font-size="8.00">2kB</text>
+</a>
+</g>
+</g>
+<!-- N2&#45;&gt;NN2_0 -->
+<g id="edge2" class="edge">
+<title>N2-&gt;NN2_0</title>
+<g id="a_edge2"><a xlink:title="1026kB">
+<path fill="none" stroke="black" d="M417,-86.79C417,-73.2 417,-58.5 417,-46.28"></path>
+<polygon fill="black" stroke="black" points="420.5,-46.27 417,-36.27 413.5,-46.27 420.5,-46.27"></polygon>
+</a>
+</g>
+<g id="a_edge2-label"><a xlink:title="1026kB">
+<text text-anchor="middle" x="447" y="-57.8" font-family="Times,serif" font-size="14.00"> 1026kB</text>
+</a>
+</g>
+</g>
+<!-- N3 -->
+<g id="node3" class="node">
+<title>N3</title>
+<g id="a_node3"><a xlink:title="runtime.schedule (1026kB)">
+<polygon fill="#edd9d5" stroke="#b22100" points="469,-646 365,-646 365,-610 469,-610 469,-646"></polygon>
+<text text-anchor="middle" x="417" y="-635.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="417" y="-626.1" font-family="Times,serif" font-size="8.00">schedule</text>
+<text text-anchor="middle" x="417" y="-617.1" font-family="Times,serif" font-size="8.00">0 of 1026kB (50.04%)</text>
+</a>
+</g>
+</g>
+<!-- N12 -->
+<g id="node12" class="node">
+<title>N12</title>
+<g id="a_node12"><a xlink:title="runtime.resetspinning (1026kB)">
+<polygon fill="#edd9d5" stroke="#b22100" points="469,-559 365,-559 365,-523 469,-523 469,-559"></polygon>
+<text text-anchor="middle" x="417" y="-548.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="417" y="-539.1" font-family="Times,serif" font-size="8.00">resetspinning</text>
+<text text-anchor="middle" x="417" y="-530.1" font-family="Times,serif" font-size="8.00">0 of 1026kB (50.04%)</text>
+</a>
+</g>
+</g>
+<!-- N3&#45;&gt;N12 -->
+<g id="edge6" class="edge">
+<title>N3-&gt;N12</title>
+<g id="a_edge6"><a xlink:title="runtime.schedule -&gt; runtime.resetspinning (1026kB)">
+<path fill="none" stroke="#b22100" stroke-width="3" d="M417,-609.8C417,-598.16 417,-582.55 417,-569.24"></path>
+<polygon fill="#b22100" stroke="#b22100" stroke-width="3" points="420.5,-569.18 417,-559.18 413.5,-569.18 420.5,-569.18"></polygon>
+</a>
+</g>
+<g id="a_edge6-label"><a xlink:title="runtime.schedule -&gt; runtime.resetspinning (1026kB)">
+<text text-anchor="middle" x="447" y="-580.8" font-family="Times,serif" font-size="14.00"> 1026kB</text>
+</a>
+</g>
+</g>
+<!-- N4 -->
+<g id="node4" class="node">
+<title>N4</title>
+<g id="a_node4"><a xlink:title="runtime.acquireSudog (512.05kB)">
+<polygon fill="#edddd5" stroke="#b23c00" points="317,-472 107,-472 107,-398 317,-398 317,-472"></polygon>
+<text text-anchor="middle" x="212" y="-452" font-family="Times,serif" font-size="20.00">runtime</text>
+<text text-anchor="middle" x="212" y="-430" font-family="Times,serif" font-size="20.00">acquireSudog</text>
+<text text-anchor="middle" x="212" y="-408" font-family="Times,serif" font-size="20.00">512.05kB (24.97%)</text>
+</a>
+</g>
+</g>
+<!-- NN4_0 -->
+<g id="NN4_0" class="node">
+<title>NN4_0</title>
+<g id="a_NN4_0"><a xlink:title="512.05kB">
+<polygon fill="#f8f8f8" stroke="black" points="239,-347 189,-347 185,-343 185,-311 235,-311 239,-315 239,-347"></polygon>
+<polyline fill="none" stroke="black" points="235,-343 185,-343 "></polyline>
+<polyline fill="none" stroke="black" points="235,-343 235,-311 "></polyline>
+<polyline fill="none" stroke="black" points="235,-343 239,-347 "></polyline>
+<text text-anchor="middle" x="212" y="-327.1" font-family="Times,serif" font-size="8.00">96B</text>
+</a>
+</g>
+</g>
+<!-- N4&#45;&gt;NN4_0 -->
+<g id="edge3" class="edge">
+<title>N4-&gt;NN4_0</title>
+<g id="a_edge3"><a xlink:title="512.05kB">
+<path fill="none" stroke="black" d="M212,-397.92C212,-384.58 212,-369.69 212,-357.26"></path>
+<polygon fill="black" stroke="black" points="215.5,-357.07 212,-347.07 208.5,-357.07 215.5,-357.07"></polygon>
+</a>
+</g>
+<g id="a_edge3-label"><a xlink:title="512.05kB">
+<text text-anchor="middle" x="248.5" y="-368.8" font-family="Times,serif" font-size="14.00"> 512.05kB</text>
+</a>
+</g>
+</g>
+<!-- N5 -->
+<g id="node5" class="node">
+<title>N5</title>
+<g id="a_node5"><a xlink:title="runtime.mcall (513kB)">
+<polygon fill="#edddd5" stroke="#b23c00" points="551.5,-835 452.5,-835 452.5,-799 551.5,-799 551.5,-835"></polygon>
+<text text-anchor="middle" x="502" y="-824.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="502" y="-815.1" font-family="Times,serif" font-size="8.00">mcall</text>
+<text text-anchor="middle" x="502" y="-806.1" font-family="Times,serif" font-size="8.00">0 of 513kB (25.02%)</text>
+</a>
+</g>
+</g>
+<!-- N11 -->
+<g id="node11" class="node">
+<title>N11</title>
+<g id="a_node11"><a xlink:title="runtime.park_m (513kB)">
+<polygon fill="#edddd5" stroke="#b23c00" points="551.5,-748 452.5,-748 452.5,-712 551.5,-712 551.5,-748"></polygon>
+<text text-anchor="middle" x="502" y="-737.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="502" y="-728.1" font-family="Times,serif" font-size="8.00">park_m</text>
+<text text-anchor="middle" x="502" y="-719.1" font-family="Times,serif" font-size="8.00">0 of 513kB (25.02%)</text>
+</a>
+</g>
+</g>
+<!-- N5&#45;&gt;N11 -->
+<g id="edge9" class="edge">
+<title>N5-&gt;N11</title>
+<g id="a_edge9"><a xlink:title="runtime.mcall -&gt; runtime.park_m (513kB)">
+<path fill="none" stroke="#b23c00" stroke-width="2" d="M502,-798.8C502,-787.16 502,-771.55 502,-758.24"></path>
+<polygon fill="#b23c00" stroke="#b23c00" stroke-width="2" points="505.5,-758.18 502,-748.18 498.5,-758.18 505.5,-758.18"></polygon>
+</a>
+</g>
+<g id="a_edge9-label"><a xlink:title="runtime.mcall -&gt; runtime.park_m (513kB)">
+<text text-anchor="middle" x="527.5" y="-769.8" font-family="Times,serif" font-size="14.00"> 513kB</text>
+</a>
+</g>
+</g>
+<!-- N6 -->
+<g id="node6" class="node">
+<title>N6</title>
+<g id="a_node6"><a xlink:title="runtime.mstart (513kB)">
+<polygon fill="#edddd5" stroke="#b23c00" points="434.5,-952 335.5,-952 335.5,-916 434.5,-916 434.5,-952"></polygon>
+<text text-anchor="middle" x="385" y="-941.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="385" y="-932.1" font-family="Times,serif" font-size="8.00">mstart</text>
+<text text-anchor="middle" x="385" y="-923.1" font-family="Times,serif" font-size="8.00">0 of 513kB (25.02%)</text>
+</a>
+</g>
+</g>
+<!-- N8 -->
+<g id="node8" class="node">
+<title>N8</title>
+<g id="a_node8"><a xlink:title="runtime.mstart0 (513kB)">
+<polygon fill="#edddd5" stroke="#b23c00" points="434.5,-835 335.5,-835 335.5,-799 434.5,-799 434.5,-835"></polygon>
+<text text-anchor="middle" x="385" y="-824.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="385" y="-815.1" font-family="Times,serif" font-size="8.00">mstart0</text>
+<text text-anchor="middle" x="385" y="-806.1" font-family="Times,serif" font-size="8.00">0 of 513kB (25.02%)</text>
+</a>
+</g>
+</g>
+<!-- N6&#45;&gt;N8 -->
+<g id="edge10" class="edge">
+<title>N6-&gt;N8</title>
+<g id="a_edge10"><a xlink:title="runtime.mstart -&gt; runtime.mstart0 (513kB)">
+<path fill="none" stroke="#b23c00" stroke-width="2" d="M385,-915.53C385,-896.94 385,-867.24 385,-845.5"></path>
+<polygon fill="#b23c00" stroke="#b23c00" stroke-width="2" points="388.5,-845.25 385,-835.25 381.5,-845.25 388.5,-845.25"></polygon>
+</a>
+</g>
+<g id="a_edge10-label"><a xlink:title="runtime.mstart -&gt; runtime.mstart0 (513kB)">
+<text text-anchor="middle" x="410.5" y="-856.8" font-family="Times,serif" font-size="14.00"> 513kB</text>
+</a>
+</g>
+</g>
+<!-- N13 -->
+<g id="node13" class="node">
+<title>N13</title>
+<g id="a_node13"><a xlink:title="runtime.semacquire (512.05kB)">
+<polygon fill="#edddd5" stroke="#b23c00" points="268,-646 156,-646 156,-610 268,-610 268,-646"></polygon>
+<text text-anchor="middle" x="212" y="-635.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="212" y="-626.1" font-family="Times,serif" font-size="8.00">semacquire</text>
+<text text-anchor="middle" x="212" y="-617.1" font-family="Times,serif" font-size="8.00">0 of 512.05kB (24.97%)</text>
+</a>
+</g>
+</g>
+<!-- N7&#45;&gt;N13 -->
+<g id="edge15" class="edge">
+<title>N7-&gt;N13</title>
+<g id="a_edge15"><a xlink:title="runtime.gcMarkDone -&gt; runtime.semacquire (512.05kB)">
+<path fill="none" stroke="#b23c00" stroke-width="2" d="M212,-711.58C212,-696.38 212,-674.07 212,-656.46"></path>
+<polygon fill="#b23c00" stroke="#b23c00" stroke-width="2" points="215.5,-656.22 212,-646.22 208.5,-656.22 215.5,-656.22"></polygon>
+</a>
+</g>
+<g id="a_edge15-label"><a xlink:title="runtime.gcMarkDone -&gt; runtime.semacquire (512.05kB)">
+<text text-anchor="middle" x="248.5" y="-682.8" font-family="Times,serif" font-size="14.00"> 512.05kB</text>
+<text text-anchor="middle" x="248.5" y="-667.8" font-family="Times,serif" font-size="14.00"> (inline)</text>
+</a>
+</g>
+</g>
+<!-- N9 -->
+<g id="node9" class="node">
+<title>N9</title>
+<g id="a_node9"><a xlink:title="runtime.mstart1 (513kB)">
+<polygon fill="#edddd5" stroke="#b23c00" points="434.5,-748 335.5,-748 335.5,-712 434.5,-712 434.5,-748"></polygon>
+<text text-anchor="middle" x="385" y="-737.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="385" y="-728.1" font-family="Times,serif" font-size="8.00">mstart1</text>
+<text text-anchor="middle" x="385" y="-719.1" font-family="Times,serif" font-size="8.00">0 of 513kB (25.02%)</text>
+</a>
+</g>
+</g>
+<!-- N8&#45;&gt;N9 -->
+<g id="edge11" class="edge">
+<title>N8-&gt;N9</title>
+<g id="a_edge11"><a xlink:title="runtime.mstart0 -&gt; runtime.mstart1 (513kB)">
+<path fill="none" stroke="#b23c00" stroke-width="2" d="M385,-798.8C385,-787.16 385,-771.55 385,-758.24"></path>
+<polygon fill="#b23c00" stroke="#b23c00" stroke-width="2" points="388.5,-758.18 385,-748.18 381.5,-758.18 388.5,-758.18"></polygon>
+</a>
+</g>
+<g id="a_edge11-label"><a xlink:title="runtime.mstart0 -&gt; runtime.mstart1 (513kB)">
+<text text-anchor="middle" x="410.5" y="-769.8" font-family="Times,serif" font-size="14.00"> 513kB</text>
+</a>
+</g>
+</g>
+<!-- N9&#45;&gt;N3 -->
+<g id="edge12" class="edge">
+<title>N9-&gt;N3</title>
+<g id="a_edge12"><a xlink:title="runtime.mstart1 -&gt; runtime.schedule (513kB)">
+<path fill="none" stroke="#b23c00" stroke-width="2" d="M390.57,-711.58C395.48,-696.24 402.71,-673.65 408.37,-655.97"></path>
+<polygon fill="#b23c00" stroke="#b23c00" stroke-width="2" points="411.78,-656.81 411.49,-646.22 405.11,-654.68 411.78,-656.81"></polygon>
+</a>
+</g>
+<g id="a_edge12-label"><a xlink:title="runtime.mstart1 -&gt; runtime.schedule (513kB)">
+<text text-anchor="middle" x="431.5" y="-675.3" font-family="Times,serif" font-size="14.00"> 513kB</text>
+</a>
+</g>
+</g>
+<!-- N10 -->
+<g id="node10" class="node">
+<title>N10</title>
+<g id="a_node10"><a xlink:title="runtime.newm (1026kB)">
+<polygon fill="#edd9d5" stroke="#b22100" points="469,-260 365,-260 365,-224 469,-224 469,-260"></polygon>
+<text text-anchor="middle" x="417" y="-249.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="417" y="-240.1" font-family="Times,serif" font-size="8.00">newm</text>
+<text text-anchor="middle" x="417" y="-231.1" font-family="Times,serif" font-size="8.00">0 of 1026kB (50.04%)</text>
+</a>
+</g>
+</g>
+<!-- N10&#45;&gt;N2 -->
+<g id="edge4" class="edge">
+<title>N10-&gt;N2</title>
+<g id="a_edge4"><a xlink:title="runtime.newm -&gt; runtime.allocm (1026kB)">
+<path fill="none" stroke="#b22100" stroke-width="3" d="M417,-223.81C417,-212.82 417,-197.91 417,-183.26"></path>
+<polygon fill="#b22100" stroke="#b22100" stroke-width="3" points="420.5,-183.21 417,-173.21 413.5,-183.21 420.5,-183.21"></polygon>
+</a>
+</g>
+<g id="a_edge4-label"><a xlink:title="runtime.newm -&gt; runtime.allocm (1026kB)">
+<text text-anchor="middle" x="447" y="-194.8" font-family="Times,serif" font-size="14.00"> 1026kB</text>
+</a>
+</g>
+</g>
+<!-- N11&#45;&gt;N3 -->
+<g id="edge13" class="edge">
+<title>N11-&gt;N3</title>
+<g id="a_edge13"><a xlink:title="runtime.park_m -&gt; runtime.schedule (513kB)">
+<path fill="none" stroke="#b23c00" stroke-width="2" d="M493.3,-711.91C485.82,-698.13 474.18,-678.7 461,-664 457.51,-660.1 453.55,-656.3 449.47,-652.73"></path>
+<polygon fill="#b23c00" stroke="#b23c00" stroke-width="2" points="451.5,-649.87 441.57,-646.17 447.03,-655.25 451.5,-649.87"></polygon>
+</a>
+</g>
+<g id="a_edge13-label"><a xlink:title="runtime.park_m -&gt; runtime.schedule (513kB)">
+<text text-anchor="middle" x="508.5" y="-675.3" font-family="Times,serif" font-size="14.00"> 513kB</text>
+</a>
+</g>
+</g>
+<!-- N16 -->
+<g id="node16" class="node">
+<title>N16</title>
+<g id="a_node16"><a xlink:title="runtime.wakep (1026kB)">
+<polygon fill="#edd9d5" stroke="#b22100" points="469,-453 365,-453 365,-417 469,-417 469,-453"></polygon>
+<text text-anchor="middle" x="417" y="-442.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="417" y="-433.1" font-family="Times,serif" font-size="8.00">wakep</text>
+<text text-anchor="middle" x="417" y="-424.1" font-family="Times,serif" font-size="8.00">0 of 1026kB (50.04%)</text>
+</a>
+</g>
+</g>
+<!-- N12&#45;&gt;N16 -->
+<g id="edge5" class="edge">
+<title>N12-&gt;N16</title>
+<g id="a_edge5"><a xlink:title="runtime.resetspinning -&gt; runtime.wakep (1026kB)">
+<path fill="none" stroke="#b22100" stroke-width="3" d="M417,-522.83C417,-506.64 417,-482.13 417,-463.27"></path>
+<polygon fill="#b22100" stroke="#b22100" stroke-width="3" points="420.5,-463.2 417,-453.2 413.5,-463.2 420.5,-463.2"></polygon>
+</a>
+</g>
+<g id="a_edge5-label"><a xlink:title="runtime.resetspinning -&gt; runtime.wakep (1026kB)">
+<text text-anchor="middle" x="447" y="-493.8" font-family="Times,serif" font-size="14.00"> 1026kB</text>
+</a>
+</g>
+</g>
+<!-- N14 -->
+<g id="node14" class="node">
+<title>N14</title>
+<g id="a_node14"><a xlink:title="runtime.semacquire1 (512.05kB)">
+<polygon fill="#edddd5" stroke="#b23c00" points="268,-559 156,-559 156,-523 268,-523 268,-559"></polygon>
+<text text-anchor="middle" x="212" y="-548.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="212" y="-539.1" font-family="Times,serif" font-size="8.00">semacquire1</text>
+<text text-anchor="middle" x="212" y="-530.1" font-family="Times,serif" font-size="8.00">0 of 512.05kB (24.97%)</text>
+</a>
+</g>
+</g>
+<!-- N13&#45;&gt;N14 -->
+<g id="edge16" class="edge">
+<title>N13-&gt;N14</title>
+<g id="a_edge16"><a xlink:title="runtime.semacquire -&gt; runtime.semacquire1 (512.05kB)">
+<path fill="none" stroke="#b23c00" stroke-width="2" d="M212,-609.8C212,-598.16 212,-582.55 212,-569.24"></path>
+<polygon fill="#b23c00" stroke="#b23c00" stroke-width="2" points="215.5,-569.18 212,-559.18 208.5,-569.18 215.5,-569.18"></polygon>
+</a>
+</g>
+<g id="a_edge16-label"><a xlink:title="runtime.semacquire -&gt; runtime.semacquire1 (512.05kB)">
+<text text-anchor="middle" x="248.5" y="-580.8" font-family="Times,serif" font-size="14.00"> 512.05kB</text>
+</a>
+</g>
+</g>
+<!-- N14&#45;&gt;N4 -->
+<g id="edge17" class="edge">
+<title>N14-&gt;N4</title>
+<g id="a_edge17"><a xlink:title="runtime.semacquire1 -&gt; runtime.acquireSudog (512.05kB)">
+<path fill="none" stroke="#b23c00" stroke-width="2" d="M212,-522.83C212,-511.78 212,-496.85 212,-482.48"></path>
+<polygon fill="#b23c00" stroke="#b23c00" stroke-width="2" points="215.5,-482.19 212,-472.19 208.5,-482.19 215.5,-482.19"></polygon>
+</a>
+</g>
+<g id="a_edge17-label"><a xlink:title="runtime.semacquire1 -&gt; runtime.acquireSudog (512.05kB)">
+<text text-anchor="middle" x="248.5" y="-493.8" font-family="Times,serif" font-size="14.00"> 512.05kB</text>
+</a>
+</g>
+</g>
+<!-- N15 -->
+<g id="node15" class="node">
+<title>N15</title>
+<g id="a_node15"><a xlink:title="runtime.startm (1026kB)">
+<polygon fill="#edd9d5" stroke="#b22100" points="469,-347 365,-347 365,-311 469,-311 469,-347"></polygon>
+<text text-anchor="middle" x="417" y="-336.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="417" y="-327.1" font-family="Times,serif" font-size="8.00">startm</text>
+<text text-anchor="middle" x="417" y="-318.1" font-family="Times,serif" font-size="8.00">0 of 1026kB (50.04%)</text>
+</a>
+</g>
+</g>
+<!-- N15&#45;&gt;N10 -->
+<g id="edge7" class="edge">
+<title>N15-&gt;N10</title>
+<g id="a_edge7"><a xlink:title="runtime.startm -&gt; runtime.newm (1026kB)">
+<path fill="none" stroke="#b22100" stroke-width="3" d="M417,-310.8C417,-299.16 417,-283.55 417,-270.24"></path>
+<polygon fill="#b22100" stroke="#b22100" stroke-width="3" points="420.5,-270.18 417,-260.18 413.5,-270.18 420.5,-270.18"></polygon>
+</a>
+</g>
+<g id="a_edge7-label"><a xlink:title="runtime.startm -&gt; runtime.newm (1026kB)">
+<text text-anchor="middle" x="447" y="-281.8" font-family="Times,serif" font-size="14.00"> 1026kB</text>
+</a>
+</g>
+</g>
+<!-- N16&#45;&gt;N15 -->
+<g id="edge8" class="edge">
+<title>N16-&gt;N15</title>
+<g id="a_edge8"><a xlink:title="runtime.wakep -&gt; runtime.startm (1026kB)">
+<path fill="none" stroke="#b22100" stroke-width="3" d="M417,-416.83C417,-400.64 417,-376.13 417,-357.27"></path>
+<polygon fill="#b22100" stroke="#b22100" stroke-width="3" points="420.5,-357.2 417,-347.2 413.5,-357.2 420.5,-357.2"></polygon>
+</a>
+</g>
+<g id="a_edge8-label"><a xlink:title="runtime.wakep -&gt; runtime.startm (1026kB)">
+<text text-anchor="middle" x="447" y="-368.8" font-family="Times,serif" font-size="14.00"> 1026kB</text>
+</a>
+</g>
+</g>
+</g>
+</svg>
+
+  </div>
+  <script>
+
+
+function initPanAndZoom(svg, clickHandler) {
+  'use strict';
+
+  
+  const IDLE = 0;
+  const MOUSEPAN = 1;
+  const TOUCHPAN = 2;
+  const TOUCHZOOM = 3;
+  let mode = IDLE;
+
+  
+  let currentScale = 1.0;
+  const initWidth = svg.viewBox.baseVal.width;
+  const initHeight = svg.viewBox.baseVal.height;
+
+  
+  let panLastX = 0;      
+  let panLastY = 0;      
+  let moved = false;     
+  let touchid = null;    
+
+  
+  let touchid2 = null;     
+  let initGap = 1.0;       
+  let initScale = 1.0;     
+  let centerPoint = null;  
+
+  
+  function toSvg(x, y) {
+    const p = svg.createSVGPoint();
+    p.x = x;
+    p.y = y;
+    let m = svg.getCTM();
+    if (m == null) m = svg.getScreenCTM(); 
+    return p.matrixTransform(m.inverse());
+  }
+
+  
+  
+  function rescale(s, u) {
+    
+    if (s < 0.2) s = 0.2;
+    if (s > 10.0) s = 10.0;
+
+    currentScale = s;
+
+    
+    
+    
+    const vb = svg.viewBox;
+    const w1 = vb.baseVal.width;
+    const w2 = initWidth / s;
+    const h1 = vb.baseVal.height;
+    const h2 = initHeight / s;
+    vb.baseVal.width = w2;
+    vb.baseVal.height = h2;
+
+    
+    
+    
+    
+    
+    
+    
+    vb.baseVal.x = u.x - (u.x - vb.baseVal.x) * (w2 / w1);
+    vb.baseVal.y = u.y - (u.y - vb.baseVal.y) * (h2 / h1);
+  }
+
+  function handleWheel(e) {
+    if (e.deltaY == 0) return;
+    
+    rescale(currentScale * (e.deltaY < 0 ? 1.1 : (1/1.1)),
+            toSvg(e.offsetX, e.offsetY));
+  }
+
+  function setMode(m) {
+    mode = m;
+    touchid = null;
+    touchid2 = null;
+  }
+
+  function panStart(x, y) {
+    moved = false;
+    panLastX = x;
+    panLastY = y;
+  }
+
+  function panMove(x, y) {
+    let dx = x - panLastX;
+    let dy = y - panLastY;
+    if (Math.abs(dx) <= 2 && Math.abs(dy) <= 2) return; 
+
+    moved = true;
+    panLastX = x;
+    panLastY = y;
+
+    
+    const swidth = svg.clientWidth || svg.parentNode.clientWidth;
+    const sheight = svg.clientHeight || svg.parentNode.clientHeight;
+
+    
+    dx *= (svg.viewBox.baseVal.width / swidth);
+    dy *= (svg.viewBox.baseVal.height / sheight);
+
+    svg.viewBox.baseVal.x -= dx;
+    svg.viewBox.baseVal.y -= dy;
+  }
+
+  function handleScanStart(e) {
+    if (e.button != 0) return; 
+    setMode(MOUSEPAN);
+    panStart(e.clientX, e.clientY);
+    e.preventDefault();
+    svg.addEventListener('mousemove', handleScanMove);
+  }
+
+  function handleScanMove(e) {
+    if (e.buttons == 0) {
+      
+      setMode(IDLE);
+      svg.removeEventListener('mousemove', handleScanMove);
+      return;
+    }
+    if (mode == MOUSEPAN) panMove(e.clientX, e.clientY);
+  }
+
+  function handleScanEnd(e) {
+    if (mode == MOUSEPAN) panMove(e.clientX, e.clientY);
+    setMode(IDLE);
+    svg.removeEventListener('mousemove', handleScanMove);
+    if (!moved) clickHandler(e.target);
+  }
+
+  
+  function findTouch(tlist, id) {
+    for (const t of tlist) {
+      if (t.identifier == id) return t;
+    }
+    return null;
+  }
+
+  
+  function touchGap(t1, t2) {
+    const dx = t1.clientX - t2.clientX;
+    const dy = t1.clientY - t2.clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  function handleTouchStart(e) {
+    if (mode == IDLE && e.changedTouches.length == 1) {
+      
+      const t = e.changedTouches[0];
+      setMode(TOUCHPAN);
+      touchid = t.identifier;
+      panStart(t.clientX, t.clientY);
+      e.preventDefault();
+    } else if (mode == TOUCHPAN && e.touches.length == 2) {
+      
+      setMode(TOUCHZOOM);
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      touchid = t1.identifier;
+      touchid2 = t2.identifier;
+      initScale = currentScale;
+      initGap = touchGap(t1, t2);
+      centerPoint = toSvg((t1.clientX + t2.clientX) / 2,
+                          (t1.clientY + t2.clientY) / 2);
+      e.preventDefault();
+    }
+  }
+
+  function handleTouchMove(e) {
+    if (mode == TOUCHPAN) {
+      const t = findTouch(e.changedTouches, touchid);
+      if (t == null) return;
+      if (e.touches.length != 1) {
+        setMode(IDLE);
+        return;
+      }
+      panMove(t.clientX, t.clientY);
+      e.preventDefault();
+    } else if (mode == TOUCHZOOM) {
+      
+      const t1 = findTouch(e.touches, touchid);
+      const t2 = findTouch(e.touches, touchid2);
+      if (t1 == null || t2 == null) return;
+      const gap = touchGap(t1, t2);
+      rescale(initScale * gap / initGap, centerPoint);
+      e.preventDefault();
+    }
+  }
+
+  function handleTouchEnd(e) {
+    if (mode == TOUCHPAN) {
+      const t = findTouch(e.changedTouches, touchid);
+      if (t == null) return;
+      panMove(t.clientX, t.clientY);
+      setMode(IDLE);
+      e.preventDefault();
+      if (!moved) clickHandler(t.target);
+    } else if (mode == TOUCHZOOM) {
+      setMode(IDLE);
+      e.preventDefault();
+    }
+  }
+
+  svg.addEventListener('mousedown', handleScanStart);
+  svg.addEventListener('mouseup', handleScanEnd);
+  svg.addEventListener('touchstart', handleTouchStart);
+  svg.addEventListener('touchmove', handleTouchMove);
+  svg.addEventListener('touchend', handleTouchEnd);
+  svg.addEventListener('wheel', handleWheel, true);
+}
+
+function initMenus() {
+  'use strict';
+
+  let activeMenu = null;
+  let activeMenuHdr = null;
+
+  function cancelActiveMenu() {
+    if (activeMenu == null) return;
+    activeMenu.style.display = 'none';
+    activeMenu = null;
+    activeMenuHdr = null;
+  }
+
+  
+  for (const menu of document.getElementsByClassName('submenu')) {
+    const hdr = menu.parentElement;
+    if (hdr == null) return;
+    if (hdr.classList.contains('disabled')) return;
+    function showMenu(e) {
+      
+      
+      if (e.target.parentElement != hdr) return;
+      activeMenu = menu;
+      activeMenuHdr = hdr;
+      menu.style.display = 'block';
+    }
+    hdr.addEventListener('mousedown', showMenu);
+    hdr.addEventListener('touchstart', showMenu);
+  }
+
+  
+  for (const t of ['mousedown', 'touchstart']) {
+    document.addEventListener(t, (e) => {
+      
+      
+      if (activeMenuHdr != e.target.closest('.menu-item')) {
+        cancelActiveMenu();
+      }
+    }, { passive: true, capture: true });
+  }
+
+  
+  document.addEventListener('mouseup', (e) => {
+    if (activeMenu == e.target.closest('.submenu')) {
+      cancelActiveMenu();
+    }
+  }, { passive: true, capture: true });
+}
+
+function sendURL(method, url, done) {
+  fetch(url.toString(), {method: method})
+      .then((response) => { done(response.ok); })
+      .catch((error) => { done(false); });
+}
+
+
+function initConfigManager() {
+  'use strict';
+
+  
+  function elem(id) {
+    const result = document.getElementById(id);
+    if (!result) console.warn('element ' + id + ' not found');
+    return result;
+  }
+  const overlay = elem('dialog-overlay');
+  const saveDialog = elem('save-dialog');
+  const saveInput = elem('save-name');
+  const saveError = elem('save-error');
+  const delDialog = elem('delete-dialog');
+  const delPrompt = elem('delete-prompt');
+  const delError = elem('delete-error');
+
+  let currentDialog = null;
+  let currentDeleteTarget = null;
+
+  function showDialog(dialog) {
+    if (currentDialog != null) {
+      overlay.style.display = 'none';
+      currentDialog.style.display = 'none';
+    }
+    currentDialog = dialog;
+    if (dialog != null) {
+      overlay.style.display = 'block';
+      dialog.style.display = 'block';
+    }
+  }
+
+  function cancelDialog(e) {
+    showDialog(null);
+  }
+
+  
+  function showSaveDialog(e) {
+    saveError.innerText = '';
+    showDialog(saveDialog);
+    saveInput.focus();
+  }
+
+  
+  function commitSave(e) {
+    const name = saveInput.value;
+    const url = new URL(document.URL);
+    
+    url.pathname = new URL('./saveconfig', document.URL).pathname;
+    url.searchParams.set('config', name);
+    saveError.innerText = '';
+    sendURL('POST', url, (ok) => {
+      if (!ok) {
+        saveError.innerText = 'Save failed';
+      } else {
+        showDialog(null);
+        location.reload();  
+      }
+    });
+  }
+
+  function handleSaveInputKey(e) {
+    if (e.key === 'Enter') commitSave(e);
+  }
+
+  function deleteConfig(e, elem) {
+    e.preventDefault();
+    const config = elem.dataset.config;
+    delPrompt.innerText = 'Delete ' + config + '?';
+    currentDeleteTarget = elem;
+    showDialog(delDialog);
+  }
+
+  function commitDelete(e, elem) {
+    if (!currentDeleteTarget) return;
+    const config = currentDeleteTarget.dataset.config;
+    const url = new URL('./deleteconfig', document.URL);
+    url.searchParams.set('config', config);
+    delError.innerText = '';
+    sendURL('DELETE', url, (ok) => {
+      if (!ok) {
+        delError.innerText = 'Delete failed';
+        return;
+      }
+      showDialog(null);
+      
+      if (currentDeleteTarget && currentDeleteTarget.parentElement) {
+        currentDeleteTarget.parentElement.remove();
+      }
+    });
+  }
+
+  
+  function bind(event, elem, fn) {
+    if (elem == null) return;
+    elem.addEventListener(event, fn);
+    if (event == 'click') {
+      
+      elem.addEventListener('touchstart', fn);
+    }
+  }
+
+  bind('click', elem('save-config'), showSaveDialog);
+  bind('click', elem('save-cancel'), cancelDialog);
+  bind('click', elem('save-confirm'), commitSave);
+  bind('keydown', saveInput, handleSaveInputKey);
+
+  bind('click', elem('delete-cancel'), cancelDialog);
+  bind('click', elem('delete-confirm'), commitDelete);
+
+  
+  for (const del of Array.from(document.getElementsByClassName('menu-delete-btn'))) {
+    bind('click', del, (e) => {
+      deleteConfig(e, del);
+    });
+  }
+}
+
+
+
+
+
+
+function viewer(baseUrl, nodes, options) {
+  'use strict';
+
+  
+  const search = document.getElementById('search');
+  const graph0 = document.getElementById('graph0');
+  const svg = (graph0 == null ? null : graph0.parentElement);
+  const toptable = document.getElementById('toptable');
+
+  let regexpActive = false;
+  let selected = new Map();
+  let origFill = new Map();
+  let searchAlarm = null;
+  let buttonsEnabled = true;
+
+  
+  function getSelection() {
+    if (selected.size > 0) {
+      return selected;
+    } else if (options && options.current) {
+      return options.current();
+    }
+    return new Map();
+  }
+
+  function handleDetails(e) {
+    e.preventDefault();
+    const detailsText = document.getElementById('detailsbox');
+    if (detailsText != null) {
+      if (detailsText.style.display === 'block') {
+        detailsText.style.display = 'none';
+      } else {
+        detailsText.style.display = 'block';
+      }
+    }
+  }
+
+  function handleKey(e) {
+    if (e.keyCode != 13) return;
+    setHrefParams(window.location, function (params) {
+      params.set('f', search.value);
+    });
+    e.preventDefault();
+  }
+
+  function handleSearch() {
+    
+    if (searchAlarm != null) {
+      clearTimeout(searchAlarm);
+    }
+    searchAlarm = setTimeout(selectMatching, 300);
+
+    regexpActive = true;
+    updateButtons();
+  }
+
+  function selectMatching() {
+    searchAlarm = null;
+    let re = null;
+    if (search.value != '') {
+      try {
+        re = new RegExp(search.value);
+      } catch (e) {
+        
+        return;
+      }
+    }
+
+    function match(text) {
+      return re != null && re.test(text);
+    }
+
+    
+    selected.forEach(function(v, n) {
+      if (!match(nodes[n])) {
+        unselect(n);
+      }
+    })
+
+    
+    if (nodes) {
+      for (let n = 0; n < nodes.length; n++) {
+        if (!selected.has(n) && match(nodes[n])) {
+          select(n);
+        }
+      }
+    }
+
+    updateButtons();
+  }
+
+  function toggleSvgSelect(elem) {
+    
+    while (elem != null && elem.parentElement != graph0) {
+      elem = elem.parentElement;
+    }
+    if (!elem) return;
+
+    
+    regexpActive = false;
+
+    const n = nodeId(elem);
+    if (n < 0) return;
+    if (selected.has(n)) {
+      unselect(n);
+    } else {
+      select(n);
+    }
+    updateButtons();
+  }
+
+  function unselect(n) {
+    if (setNodeHighlight(n, false)) selected.delete(n);
+  }
+
+  function select(n, elem) {
+    if (setNodeHighlight(n, true)) selected.set(n, true);
+  }
+
+  function nodeId(elem) {
+    const id = elem.id;
+    if (!id) return -1;
+    if (!id.startsWith('node')) return -1;
+    const n = parseInt(id.slice(4), 10);
+    if (isNaN(n)) return -1;
+    if (n < 0 || n >= nodes.length) return -1;
+    return n;
+  }
+
+  
+  function setNodeHighlight(n, set) {
+    if (options && options.hiliter) return options.hiliter(n, set);
+
+    const elem = document.getElementById('node' + n);
+    if (!elem) return false;
+
+    
+    if (elem.nodeName == 'TR') {
+      elem.classList.toggle('hilite', set);
+      return true;
+    }
+
+    
+    const p = findPolygon(elem);
+    if (p != null) {
+      if (set) {
+        origFill.set(p, p.style.fill);
+        p.style.fill = '#ccccff';
+      } else if (origFill.has(p)) {
+        p.style.fill = origFill.get(p);
+      }
+    }
+
+    return true;
+  }
+
+  function findPolygon(elem) {
+    if (elem.localName == 'polygon') return elem;
+    for (const c of elem.children) {
+      const p = findPolygon(c);
+      if (p != null) return p;
+    }
+    return null;
+  }
+
+  function setSampleIndexLink(si) {
+    const elem = document.getElementById('sampletype-' + si);
+    if (elem != null) {
+      setHrefParams(elem, function (params) {
+        params.set("si", si);
+      });
+    }
+  }
+
+  
+  
+  function makeSearchLinkDynamic(id) {
+    const elem = document.getElementById(id);
+    if (elem == null) return;
+
+    
+    
+    let param = 'f';
+    if (id == 'ignore') param = 'i';
+    if (id == 'hide') param = 'h';
+    if (id == 'show') param = 's';
+    if (id == 'show-from') param = 'sf';
+
+    
+    elem.addEventListener('mouseenter', updater);
+    elem.addEventListener('touchstart', updater);
+
+    function updater() {
+      
+      
+      let re = regexpActive
+          ? search.value
+          : Array.from(getSelection().keys()).map(key => pprofQuoteMeta(nodes[key])).join('|');
+
+      setHrefParams(elem, function (params) {
+        if (re != '') {
+          
+          if (param != 'f' && param != 's' && param != 'sf' && params.has(param)) {
+            const old = params.get(param);
+            if (old != '') {
+              re += '|' + old;
+            }
+          }
+          params.set(param, re);
+        } else {
+          params.delete(param);
+        }
+      });
+    }
+  }
+
+  function setHrefParams(elem, paramSetter) {
+    let url = new URL(elem.href);
+    url.hash = '';
+
+    
+    const params = url.searchParams;
+    for (const p of new URLSearchParams(window.location.search)) {
+      params.set(p[0], p[1]);
+    }
+
+    
+    paramSetter(params);
+
+    elem.href = url.toString();
+  }
+
+  function handleTopClick(e) {
+    
+    let elem = e.target;
+    while (elem != null && elem.nodeName != 'TR') {
+      elem = elem.parentElement;
+    }
+    if (elem == null || elem.children.length < 6) return;
+
+    e.preventDefault();
+    const tr = elem;
+    const td = elem.children[5];
+    if (td.nodeName != 'TD') return;
+    const name = td.innerText;
+    const index = nodes.indexOf(name);
+    if (index < 0) return;
+
+    
+    regexpActive = false;
+
+    if (selected.has(index)) {
+      unselect(index, elem);
+    } else {
+      select(index, elem);
+    }
+    updateButtons();
+  }
+
+  function updateButtons() {
+    const enable = (search.value != '' || getSelection().size != 0);
+    if (buttonsEnabled == enable) return;
+    buttonsEnabled = enable;
+    for (const id of ['focus', 'ignore', 'hide', 'show', 'show-from']) {
+      const link = document.getElementById(id);
+      if (link != null) {
+        link.classList.toggle('disabled', !enable);
+      }
+    }
+  }
+
+  
+  updateButtons();
+
+  
+  initMenus();
+  if (svg != null) {
+    initPanAndZoom(svg, toggleSvgSelect);
+  }
+  if (toptable != null) {
+    toptable.addEventListener('mousedown', handleTopClick);
+    toptable.addEventListener('touchstart', handleTopClick);
+  }
+
+  const ids = ['topbtn', 'graphbtn',
+               'flamegraph',
+               'peek', 'list',
+               'disasm', 'focus', 'ignore', 'hide', 'show', 'show-from'];
+  ids.forEach(makeSearchLinkDynamic);
+
+  const sampleIDs = ['alloc_objects', 'alloc_space', 'inuse_objects', 'inuse_space', ];
+  sampleIDs.forEach(setSampleIndexLink);
+
+  
+  function addAction(id, action) {
+    const btn = document.getElementById(id);
+    if (btn != null) {
+      btn.addEventListener('click', action);
+      btn.addEventListener('touchstart', action);
+    }
+  }
+
+  addAction('details', handleDetails);
+  initConfigManager();
+
+  search.addEventListener('input', handleSearch);
+  search.addEventListener('keydown', handleKey);
+
+  
+  const main = document.getElementById('bodycontainer');
+  if (main) {
+    main.focus();
+  }
+}
+
+
+function pprofQuoteMeta(str) {
+  return '^' + str.replace(/([\\\.?+*\[\](){}|^$])/g, '\\$1') + '$';
+}
+</script>
+
+  <script>viewer(new URL(window.location.href), ["","runtime.gcBgMarkWorker","runtime.allocm","runtime.schedule","runtime.acquireSudog","runtime.mcall","runtime.mstart","runtime.gcMarkDone","runtime.mstart0","runtime.mstart1","runtime.newm","runtime.park_m","runtime.resetspinning","runtime.semacquire","runtime.semacquire1","runtime.startm","runtime.wakep"]);</script>
+
+
+</body></html>
