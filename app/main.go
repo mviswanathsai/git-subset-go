@@ -434,13 +434,15 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
 			os.Exit(1)
 		}
+
 		packFile := fp.Join(workingDir, git.GitObjDir, "pack", fmt.Sprintf("pack-%x.pack", fileHash))
 		if err := os.Rename(tmp.Name(), packFile); err != nil {
 			fmt.Printf("Error renaming file: %v\n", err)
 		}
 
+		os.Chdir(workingDir)
 		// Write the objects into the git object store
-		pf, fileInfo := files.OpenFile(packFile)
+		pf, fileInfo := files.OpenFile(fp.Join(git.GitObjDir, "pack", fmt.Sprintf("pack-%x.pack", fileHash)))
 
 		br.Reset(pf)
 		_, nObj, err := readPackHeader(br)
@@ -474,13 +476,13 @@ func main() {
 			builder.hashMap[resolved.SHA1] = resolved
 			objDirName, objFileName := hashes.DecomposeHash(resolved.SHA1)
 
-			err = os.MkdirAll(fp.Join(workingDir, git.GitObjDir, objDirName), 0775)
+			err = os.MkdirAll(fp.Join(git.GitObjDir, objDirName), 0775)
 			if err != nil && !errors.Is(err, fs.ErrExist) {
 				fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
 				os.Exit(1)
 			}
 
-			tmpf, err := os.CreateTemp(fp.Join(workingDir, git.GitObjDir), "tmp_obj_")
+			tmpf, err := os.CreateTemp(git.GitObjDir, "tmp_obj_")
 			if err != nil {
 				fmt.Println("Error creating temp file")
 			}
@@ -493,7 +495,7 @@ func main() {
 			zw.Write(resolved.Data)
 			zw.Close()
 
-			objFilePath := fp.Join(workingDir, git.GitObjDir, objDirName, objFileName)
+			objFilePath := fp.Join(git.GitObjDir, objDirName, objFileName)
 			if err = os.Rename(tmpf.Name(), objFilePath); err != nil {
 				fmt.Fprintf(os.Stderr, "Error creating object: %v\n", err)
 				os.Exit(1)
@@ -513,7 +515,7 @@ func main() {
 
 			localRef := strings.Replace(ref, "refs/heads/", "refs/remotes/origin/", 1)
 
-			destPath := fp.Join(workingDir, ".git", localRef)
+			destPath := fp.Join(".git", localRef)
 			parentDir := fp.Dir(destPath)
 
 			if err := os.MkdirAll(parentDir, 0755); err != nil {
@@ -531,15 +533,15 @@ func main() {
 		if localDefaultBranch != "" {
 			// Set the remote HEAD ref
 			localRef := strings.Replace(localDefaultBranch, "refs/heads/", "refs/remotes/origin/", 1)
-			originHeadPath := fp.Join(workingDir, ".git", "refs/remotes/origin/HEAD")
+			originHeadPath := fp.Join(".git", "refs/remotes/origin/HEAD")
 			symbolicContent := fmt.Sprintf("ref: %s\n", localRef)
 			os.WriteFile(originHeadPath, []byte(symbolicContent), 0644)
 
 			// Create the LOCAL branch ref (e.g., .git/refs/heads/main)
-			localBranchPath := fp.Join(workingDir, ".git", localDefaultBranch)
+			localBranchPath := fp.Join(".git", localDefaultBranch)
 			os.MkdirAll(fp.Dir(localBranchPath), 0755)
 			os.WriteFile(localBranchPath, append(remoteHeadSHA, '\n'), 0644)
-			rootHeadPath := fp.Join(workingDir, ".git", "HEAD")
+			rootHeadPath := fp.Join(".git", "HEAD")
 			rootHeadContent := fmt.Sprintf("ref: %s\n", localDefaultBranch)
 			os.WriteFile(rootHeadPath, []byte(rootHeadContent), 0644)
 		}
@@ -562,7 +564,7 @@ func (builder *objectBuilder) checkoutRepository(headSHA []byte) {
 	headCommit := builder.hashMap[string(headSHA)]
 	treeSHA := returnCommitTreeSHA(headCommit.Data)
 	treeData := builder.hashMap[treeSHA].Data
-	builder.buildRepository(builder.workingDir, treeData)
+	builder.buildRepository("", treeData)
 }
 
 // When I see a tree:
@@ -576,8 +578,8 @@ func (builder *objectBuilder) buildRepository(workingDir string, treeData []byte
 			// write the files
 			os.WriteFile(fp.Join(workingDir, treeEntry.name), builder.hashMap[treeEntry.sha1].Data, TranslateGitMode(treeEntry.mode))
 		} else {
-            curDir := fp.Join(workingDir, treeEntry.name)
-            os.MkdirAll(curDir, 0755)
+			curDir := fp.Join(workingDir, treeEntry.name)
+			os.MkdirAll(curDir, 0755)
 			treeData := builder.hashMap[treeEntry.sha1].Data
 			builder.buildRepository(fp.Join(workingDir, treeEntry.name), treeData)
 		}
