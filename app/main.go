@@ -375,6 +375,7 @@ func main() {
 		// Reset the reader
 		br.Reset(res.Body)
 		tmp, _ := os.CreateTemp(".", "tmp_pack_")
+		defer os.Remove(tmp.Name())
 		// Demux the response
 		for {
 			// 1. Read the 4-byte hex length
@@ -410,7 +411,83 @@ func main() {
 				io.CopyN(os.Stderr, br, int64(length-5))
 			}
 		}
-		os.Rename(tmp.Name(), "packfile.pack")
+		// create the directory
+		workingDir := "test-repo"
+		tmp.Seek(-20, 2)
+		br.Reset(tmp)
+		fileHash := make([]byte, 20)
+		io.ReadFull(br, fileHash)
+		fileInfo, _ := os.Stat(tmp.Name())
+
+		if verifyPackTrailer(tmp, fileInfo, fileHash) {
+			fmt.Printf("%s: ok\n", tmp.Name())
+		} else {
+			fmt.Printf("%s: error\n", tmp.Name())
+		}
+
+		err = os.MkdirAll(fp.Join(workingDir, git.GitObjDir, "pack"), 0775)
+		if err != nil && !errors.Is(err, fs.ErrExist) {
+			fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
+			os.Exit(1)
+		}
+		packFile := fp.Join(workingDir, git.GitObjDir, "pack", fmt.Sprintf("pack-%x.pack", fileHash))
+		os.Rename(tmp.Name(), fp.Join(workingDir, git.GitObjDir, "pack", packFile))
+
+		pf, fileInfo := files.OpenFile(packFile)
+
+		br.Reset(pf)
+		_, nObj, err := readPackHeader(br)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Pack header invalid: %v", err)
+			os.Exit(1)
+		}
+
+		var zr io.ReadCloser
+
+		builder := &objectBuilder{
+			packIndex:   make(map[uint64]packNode),
+			lookupCache: make(map[uint64]*ResolvedObject),
+			packOrder:   make([]uint64, 0),
+			packLength:  nObj,
+			br:          br,
+			file:        pf,
+			fileInfo:    fileInfo,
+			zr:          zr,
+			hasher:      sha1.New(),
+		}
+
+		builder.BuildIndex()
+
+		for _, offset := range builder.packOrder {
+			node := builder.packIndex[offset]
+
+			resolved := builder.buildObject(node)
+			objDirName, objFileName := hashes.DecomposeHash(resolved.SHA1)
+
+			err = os.MkdirAll(fp.Join(workingDir, git.GitObjDir, objDirName), 0775)
+			if err != nil && !errors.Is(err, fs.ErrExist) {
+				fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
+				os.Exit(1)
+			}
+
+			tmpf, err := os.CreateTemp(fp.Join(workingDir, git.GitObjDir), "tmp_obj_")
+            if err != nil {
+                fmt.Println("Error creating temp file")
+            }
+            defer os.Remove(tmpf.Name())
+            zw := builder.getZlibWriter(tmpf)
+            zw.Write(TypeToBytes(resolved.Type))
+            zw.Write([]byte{' '})
+            zw.Write(fmt.Appendf(nil,"%d", len(resolved.Data)))
+            zw.Write(resolved.Data)
+            zw.Close()
+            objFilePath := fp.Join(workingDir, git.GitObjDir, objDirName, objFileName)
+            if err = os.Rename(tmpf.Name(), objFilePath); err != nil {
+                fmt.Fprintf(os.Stderr, "Error creating object: %v\n", err)
+                os.Exit(1)
+            }
+		}
+        fmt.Println("Done")
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
@@ -611,7 +688,17 @@ type objectBuilder struct {
 	fileInfo    os.FileInfo
 	br          *bufio.Reader
 	zr          io.ReadCloser
+	zw          *zlib.Writer
 	hasher      hash.Hash
+}
+
+func (builder *objectBuilder) getZlibWriter(w io.Writer) *zlib.Writer {
+	if builder.zw == nil {
+		builder.zw = zlib.NewWriter(w)
+	} else {
+		builder.zw.Reset(w)
+	}
+    return builder.zw
 }
 
 func (builder *objectBuilder) Index() map[uint64]packNode {
