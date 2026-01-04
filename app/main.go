@@ -339,8 +339,10 @@ func main() {
 			os.Exit(1)
 		}
 		readPktLine(br)
+
 		var negotiated []byte
-		var shas [][]byte
+		refs := make(map[string][]byte)
+		peeledRefs := make(map[string][]byte)
 		for {
 			line, err := readPktLine(br)
 			if err != nil || line == nil {
@@ -359,13 +361,14 @@ func main() {
 			}
 			// TODO: maybe deduplicate this in the future
 			if bytes.Contains(line, []byte("^{}")) {
+				peeledRefs[string(line[41:])] = line[:40]
 				continue
 			}
-			shas = append(shas, line[:40])
+			refs[string(line[41:])] = line[:40]
 		}
 		// Now we have to create the want/have request. In our case, just wants.
 		var reqBody bytes.Buffer
-		prepareReq(&reqBody, shas, negotiated)
+		prepareReq(&reqBody, refs, negotiated)
 		str2 := fmt.Sprintf("%s/git-upload-pack", repo)
 		res, err := http.Post(str2, "application/x-git-upload-pack-request", &reqBody)
 		if res.StatusCode != http.StatusOK {
@@ -431,7 +434,9 @@ func main() {
 			os.Exit(1)
 		}
 		packFile := fp.Join(workingDir, git.GitObjDir, "pack", fmt.Sprintf("pack-%x.pack", fileHash))
-		os.Rename(tmp.Name(), fp.Join(workingDir, git.GitObjDir, "pack", packFile))
+		if err := os.Rename(tmp.Name(), packFile); err != nil {
+			fmt.Printf("Error renaming file: %v\n", err)
+		}
 
 		pf, fileInfo := files.OpenFile(packFile)
 
@@ -471,23 +476,23 @@ func main() {
 			}
 
 			tmpf, err := os.CreateTemp(fp.Join(workingDir, git.GitObjDir), "tmp_obj_")
-            if err != nil {
-                fmt.Println("Error creating temp file")
-            }
-            defer os.Remove(tmpf.Name())
-            zw := builder.getZlibWriter(tmpf)
-            zw.Write(TypeToBytes(resolved.Type))
-            zw.Write([]byte{' '})
-            zw.Write(fmt.Appendf(nil,"%d", len(resolved.Data)))
-            zw.Write(resolved.Data)
-            zw.Close()
-            objFilePath := fp.Join(workingDir, git.GitObjDir, objDirName, objFileName)
-            if err = os.Rename(tmpf.Name(), objFilePath); err != nil {
-                fmt.Fprintf(os.Stderr, "Error creating object: %v\n", err)
-                os.Exit(1)
-            }
+			if err != nil {
+				fmt.Println("Error creating temp file")
+			}
+			defer os.Remove(tmpf.Name())
+			zw := builder.getZlibWriter(tmpf)
+			zw.Write(TypeToBytes(resolved.Type))
+			zw.Write([]byte{' '})
+			zw.Write(fmt.Appendf(nil, "%d", len(resolved.Data)))
+			zw.Write(resolved.Data)
+			zw.Close()
+			objFilePath := fp.Join(workingDir, git.GitObjDir, objDirName, objFileName)
+			if err = os.Rename(tmpf.Name(), objFilePath); err != nil {
+				fmt.Fprintf(os.Stderr, "Error creating object: %v\n", err)
+				os.Exit(1)
+			}
 		}
-        fmt.Println("Done")
+		fmt.Println("Done")
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
@@ -495,10 +500,10 @@ func main() {
 	}
 }
 
-func prepareReq(buf *bytes.Buffer, shas [][]byte, negotiated []byte) {
-	for i, pkt := range shas {
+func prepareReq(buf *bytes.Buffer, refs map[string][]byte, negotiated []byte) {
+	for ref, pkt := range refs {
 		var pktPayload string
-		if i == 0 {
+		if ref == "HEAD" {
 			pktPayload = fmt.Sprintf("want %s %s\n", pkt, negotiated)
 		} else {
 			pktPayload = fmt.Sprintf("want %s\n", pkt)
@@ -698,7 +703,7 @@ func (builder *objectBuilder) getZlibWriter(w io.Writer) *zlib.Writer {
 	} else {
 		builder.zw.Reset(w)
 	}
-    return builder.zw
+	return builder.zw
 }
 
 func (builder *objectBuilder) Index() map[uint64]packNode {
