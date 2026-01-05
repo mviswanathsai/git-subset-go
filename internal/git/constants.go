@@ -4,7 +4,9 @@ import "io/fs"
 
 const (
 	GitObjDir           = ".git/objects"
-	GitRefsDir           = ".git/refs"
+	GitRefsDir          = ".git/refs"
+	GitDir              = ".git"
+	GitIndexPath        = ".git/index"
 	ObjHeaderDelim      = 0
 	GitExModeOct        = fs.FileMode(0111)
 	GitDirMode          = "40000"
