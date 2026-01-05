@@ -61,7 +61,7 @@ func main() {
 		blobname := objhash[2:]
 
 		// we first need to open the file
-		filename := fp.Join("test-repo", git.GitObjDir, blobdir, blobname)
+		filename := fp.Join(git.GitObjDir, blobdir, blobname)
 		f, err := os.Open(filename)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error opening file: %v\n", err)
