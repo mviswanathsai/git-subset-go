@@ -145,7 +145,6 @@ func main() {
 		fmt.Printf("%v\n", strings.Join(out, "\n"))
 
 	case "write-tree":
-		// Get the current working directory
 		ex, err := os.Getwd()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error getting current working dir: %v\n", err)
@@ -198,26 +197,23 @@ func main() {
 		message := os.Args[6]
 		author := "Teenus Lorvalds"
 		email := "teenus@lorvalds.com"
-
-		tmpf := files.CreateTempObjFile()
-		defer tmpf.Close()
-
 		t := time.Now()
 		timestamp := t.Unix()
 		offset := t.Format("-0700")
 
-		var sb strings.Builder
-		fmt.Fprintf(&sb, "tree %s\n", treesha)
-		fmt.Fprintf(&sb, "parent %s\n", commitsha)
-		fmt.Fprintf(&sb, "author %s <%s> %d %s\n", author, email, timestamp, offset)
-		fmt.Fprintf(&sb, "\n%s\n", message)
+        buf := new(bytes.Buffer)
+		fmt.Fprintf(buf, "tree %s\n", treesha)
+		fmt.Fprintf(buf, "parent %s\n", commitsha)
+		fmt.Fprintf(buf, "author %s <%s> %d %s\n", author, email, timestamp, offset)
+		fmt.Fprintf(buf, "\n%s\n", message)
 
-		b := bytes.NewBuffer([]byte(sb.String()))
+
+		tmpf := files.CreateTempObjFile()
 		hash := sha1.New()
 		zw := zlib.NewWriter(tmpf)
 		mw := io.MultiWriter(hash, zw)
 
-		files.WriteGitObject(mw, "commit", b.Len(), b)
+		files.WriteGitObject(mw, "commit", buf.Len(), buf)
 		zw.Close()
 		tmpf.Close()
 

@@ -31,6 +31,7 @@ func OpenFile(filename string) (*os.File, os.FileInfo) {
 	return df, info
 }
 
+// The caller is responsible for closing the writers as necessary.
 func WriteGitObject(writer io.Writer, objType string, payloadSize int, payload io.Reader) {
 	header := fmt.Sprintf("%s %d\x00", objType, payloadSize)
 	if _, err := writer.Write([]byte(header)); err != nil {
