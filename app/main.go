@@ -416,7 +416,7 @@ func main() {
 			}
 		}
 		// create the .git directory and packfile
-		workingDir := "test-repo"
+		workingDir, _ := strings.CutSuffix(fp.Base(repo), ".git")
 		tmp.Seek(-20, 2)
 		br.Reset(tmp)
 		fileHash := make([]byte, 20)
