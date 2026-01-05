@@ -20,6 +20,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	files "github.com/codecrafters-io/git-starter-go/internal/files"
@@ -549,41 +550,143 @@ func main() {
 		// Checkout into the current HEAD
 		headSHA := refs["HEAD"]
 		// Read it from the hashMap
-		builder.checkoutRepository(headSHA)
-		// When I see a tree:
-		// 1. I need to create a directory for it.
-		// 2. I need to parse the contents of the tree into it's own directory
-		// 3. Repeat
+		checkoutResult := builder.checkoutRepository(headSHA)
+        indexEntries := checkoutResult.indexEntries
+
+		fmt.Printf("index entries: %v\n", indexEntries)
+
+		slices.SortFunc(indexEntries, func(a, b *IndexEntry) int {
+			return strings.Compare(a.Path, b.Path)
+		})
+
+		tmpf, _ := os.CreateTemp(git.GitDir, "tmp_index_")
+		defer os.Remove(tmpf.Name())
+		sha := sha1.New()
+		mw := io.MultiWriter(tmpf, sha)
+		mw.Write([]byte{'D', 'I', 'R', 'C'})
+		binary.Write(mw, binary.BigEndian, uint32(2))
+		binary.Write(mw, binary.BigEndian, uint32(len(indexEntries)))
+		for _, entry := range indexEntries {
+			writeGitIndexLine(entry, mw)
+		}
+		h := sha.Sum(nil)
+		tmpf.Write(h)
+
+		if err = os.Rename(tmpf.Name(), git.GitIndexPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating object: %v\n", err)
+			os.Exit(1)
+		}
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
 	}
 }
 
-func (builder *objectBuilder) checkoutRepository(headSHA []byte) {
+type IndexEntry struct {
+	CtimeSec  uint32
+	CtimeNano uint32
+	MtimeSec  uint32
+	MtimeNano uint32
+	Dev       uint32
+	Ino       uint32
+	Mode      uint32
+	UID       uint32
+	GID       uint32
+	Size      uint32
+	SHA       [20]byte // Binary SHA-1 (not hex)
+	Flags     uint16   // 1-bit assume-unchanged, 1-bit extended, 2-bit stage, 12-bit name length
+	Path      string   // The relative path (e.g., "dir/file.txt")
+}
+
+func writeGitIndexLine(e *IndexEntry, w io.Writer) {
+	binary.Write(w, binary.BigEndian, e.CtimeSec)
+	binary.Write(w, binary.BigEndian, e.CtimeNano)
+	binary.Write(w, binary.BigEndian, e.MtimeSec)
+	binary.Write(w, binary.BigEndian, e.MtimeNano)
+	binary.Write(w, binary.BigEndian, e.Dev)
+	binary.Write(w, binary.BigEndian, e.Ino)
+	binary.Write(w, binary.BigEndian, e.Mode)
+	binary.Write(w, binary.BigEndian, e.UID)
+	binary.Write(w, binary.BigEndian, e.GID)
+	binary.Write(w, binary.BigEndian, e.Size)
+	w.Write(e.SHA[:])
+	binary.Write(w, binary.BigEndian, e.Flags)
+
+	// Write the path
+	w.Write([]byte(e.Path))
+
+	// Padding logic: Git requires 1-8 null bytes to reach
+	// a total entry length that is a multiple of 8.
+	entryLenSoFar := 62 + len(e.Path)
+	padding := 8 - (entryLenSoFar % 8)
+	if padding == 0 {
+		padding = 8
+	}
+	w.Write(make([]byte, padding))
+}
+
+func (builder *objectBuilder) checkoutRepository(headSHA []byte) *checkoutResult {
+	result := &checkoutResult{indexEntries: make([]*IndexEntry, 0, 32)}
 	headCommit := builder.hashMap[string(headSHA)]
 	treeSHA := returnCommitTreeSHA(headCommit.Data)
 	treeData := builder.hashMap[treeSHA].Data
-	builder.buildRepository("", treeData)
+	builder.buildRepository("", treeData, result)
+	return result
 }
 
 // When I see a tree:
 // 1. I need to create a directory for it.
 // 2. I need to parse the contents of the tree into it's own directory
 // 3. Repeat
-func (builder *objectBuilder) buildRepository(workingDir string, treeData []byte) {
+func (builder *objectBuilder) buildRepository(workingDir string, treeData []byte, result *checkoutResult) {
 	treeEntries := parseTree(treeData)
 	for _, treeEntry := range treeEntries {
 		if treeEntry.mode != git.GitDirMode {
 			// write the files
-			os.WriteFile(fp.Join(workingDir, treeEntry.name), builder.hashMap[treeEntry.sha1].Data, TranslateGitMode(treeEntry.mode))
+			filepath := fp.Join(workingDir, treeEntry.name)
+			os.WriteFile(filepath, builder.hashMap[treeEntry.sha1].Data, TranslateGitMode(treeEntry.mode))
+			fileInfo, _ := os.Lstat(filepath)
+			shaBytes, _ := hex.DecodeString(treeEntry.sha1)
+			stat := fileInfo.Sys().(*syscall.Stat_t)
+			lengthFlag := min(len(filepath), 0x0FFF)
+			result.indexEntries = append(result.indexEntries, &IndexEntry{
+				CtimeSec:  uint32(stat.Ctim.Sec),
+				CtimeNano: uint32(stat.Ctim.Nsec),
+				MtimeSec:  uint32(stat.Mtim.Sec),
+				MtimeNano: uint32(stat.Mtim.Nsec),
+				Dev:       uint32(stat.Dev),
+				Ino:       uint32(stat.Ino),
+				Mode:      uint32(TranslateGitModeToUint(treeEntry.mode)),
+				UID:       uint32(stat.Uid),
+				GID:       uint32(stat.Gid),
+				Size:      uint32(fileInfo.Size()),
+				SHA:       [20]byte(shaBytes),
+				Flags:     uint16(lengthFlag),
+				Path:      filepath,
+			})
 		} else {
 			curDir := fp.Join(workingDir, treeEntry.name)
 			os.MkdirAll(curDir, 0755)
 			treeData := builder.hashMap[treeEntry.sha1].Data
-			builder.buildRepository(fp.Join(workingDir, treeEntry.name), treeData)
+			builder.buildRepository(fp.Join(workingDir, treeEntry.name), treeData, result)
 		}
 	}
+}
+
+func TranslateGitModeToUint(gitMode string) uint32 {
+	switch gitMode {
+	case "100644":
+		return 33188 // Octal 0100644
+	case "100755":
+		return 33261 // Octal 0100755
+	default:
+		return 33188
+	}
+}
+
+type checkoutResult struct {
+	indexEntries []*IndexEntry
 }
 
 // TranslateGitMode converts Git mode strings to standard Unix os.FileMode
