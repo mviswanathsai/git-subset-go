@@ -553,8 +553,6 @@ func main() {
 		checkoutResult := builder.checkoutRepository(headSHA)
         indexEntries := checkoutResult.indexEntries
 
-		fmt.Printf("index entries: %v\n", indexEntries)
-
 		slices.SortFunc(indexEntries, func(a, b *IndexEntry) int {
 			return strings.Compare(a.Path, b.Path)
 		})
