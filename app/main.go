@@ -156,18 +156,25 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error getting current working dir: %v\n", err)
 		}
 
-		tree := generateTreePayload(cwd, ".")
+		hash := sha1.New()
+		zw := zlib.NewWriter(nil)
+		defer zw.Close()
+
+		treeBuilder := &TreeBuilder{
+			hash: hash,
+			zw:   zw,
+		}
+
+		payload := treeBuilder.generateTreePayload(cwd, ".")
 
 		tmpf := files.CreateTempObjFile()
 		defer os.Remove(tmpf.Name())
 
-		hash := sha1.New()
-		zw := zlib.NewWriter(tmpf)
+		hash.Reset()
+		zw.Reset(tmpf)
 		mw := io.MultiWriter(hash, zw)
 
-		files.WriteGitObject(mw, "tree", tree.Len(), tree)
-		zw.Close()
-		tmpf.Close()
+		files.WriteGitObject(mw, "tree", payload.Len(), payload)
 		h := hex.EncodeToString(hash.Sum(nil))
 
 		objDirName, objFileName := hashes.DecomposeHash(h)
@@ -318,7 +325,7 @@ func main() {
 	case "clone":
 		// just get the references from a remote repo
 		repo := os.Args[2]
-        workingDir := os.Args[3]
+		workingDir := os.Args[3]
 		str := fmt.Sprintf("%s/info/refs?service=git-upload-pack", repo)
 		resp, err := http.Get(str)
 		if err != nil {
@@ -551,7 +558,7 @@ func main() {
 		headSHA := refs["HEAD"]
 		// Read it from the hashMap
 		checkoutResult := builder.checkoutRepository(headSHA)
-        indexEntries := checkoutResult.indexEntries
+		indexEntries := checkoutResult.indexEntries
 
 		slices.SortFunc(indexEntries, func(a, b *IndexEntry) int {
 			return strings.Compare(a.Path, b.Path)
@@ -1370,43 +1377,26 @@ func (e GitTreeEntry) String() string {
 	return fmt.Sprintf("%s %s\x00%s", e.Mode, e.Name, e.Hash)
 }
 
+type TreeBuilder struct {
+	zw   *zlib.Writer
+	hash hash.Hash
+}
+
 // TODO: maybe use goroutines here for performance.
-func generateTreePayload(cwd []fs.DirEntry, currentPath string) *bytes.Buffer {
+func (b *TreeBuilder) generateTreePayload(cwd []fs.DirEntry, currentPath string) *bytes.Buffer {
 	var entries []GitTreeEntry
 	for _, e := range cwd {
 		if e.Name() == ".git" {
 			continue
-		}
-		if e.IsDir() {
-			tmpf := files.CreateTempObjFile()
-			defer os.Remove(tmpf.Name())
-
+		} else if e.IsDir() {
 			sd, err := os.ReadDir(fp.Join(currentPath, e.Name()))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error walking current working directory: %v\n", err)
 			}
 
-			sdTreeBody := generateTreePayload(sd, fp.Join(currentPath, e.Name()))
+			subtreePayload := b.generateTreePayload(sd, fp.Join(currentPath, e.Name()))
 
-			hash := sha1.New()
-			zw := zlib.NewWriter(tmpf)
-			mw := io.MultiWriter(hash, zw)
-
-			files.WriteGitObject(mw, "tree", sdTreeBody.Len(), sdTreeBody)
-			tmpf.Close()
-			zw.Close()
-
-			hsum := hash.Sum(nil)
-
-			//    objDirName, objFileName := pathFromHash(h)
-			//    err = os.MkdirAll(fp.Join(git.GitObjDir, objDirName), 0775)
-			//    if err != nil && !errors.Is(err, fs.ErrExist) {
-			//    	fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
-			//    	os.Exit(1)
-			//    }
-
-			//    objFilePath := fp.Join(git.GitObjDir, objDirName, objFileName)
-			//    os.Rename(tmpf.Name(), objFilePath)
+			hsum := b.writeAndGetHash("tree", subtreePayload.Len(), subtreePayload)
 
 			entry := GitTreeEntry{
 				Mode: git.GitDirMode,
@@ -1416,32 +1406,10 @@ func generateTreePayload(cwd []fs.DirEntry, currentPath string) *bytes.Buffer {
 			entries = append(entries, entry)
 
 		} else if !e.IsDir() {
-			tmpf := files.CreateTempObjFile()
-			defer os.Remove(tmpf.Name())
 
 			f, finfo := files.OpenFile(fp.Join(currentPath, e.Name()))
 
-			hash := sha1.New()
-			zw := zlib.NewWriter(tmpf)
-			mw := io.MultiWriter(hash, zw)
-
-			files.WriteGitObject(mw, "blob", int(finfo.Size()), f)
-			hsum := hash.Sum(nil)
-			zw.Close()
-			tmpf.Close()
-
-			////	objDirName, objFileName := pathFromHash(h)
-			////	err = os.MkdirAll(fp.Join(git.GitObjDir, objDirName), 0775)
-			////	if err != nil && !errors.Is(err, fs.ErrExist) {
-			////		fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
-			////		os.Exit(1)
-			////	}
-
-			////	objFilePath := fp.Join(git.GitObjDir, objDirName, objFileName)
-			////	if os.Rename(tmpf.Name(), objFilePath) != nil {
-			////		fmt.Fprintf(os.Stderr, "Error creating blob object: %v\n", err)
-			////		os.Exit(1)
-			////	}
+            hsum := b.writeAndGetHash("blob", int(finfo.Size()), f)
 
 			fmode := finfo.Mode().Perm()
 			var mode string
@@ -1472,10 +1440,41 @@ func generateTreePayload(cwd []fs.DirEntry, currentPath string) *bytes.Buffer {
 		return strings.Compare(aName, bName)
 	})
 
-	var treeBody string
-	for _, entry := range entries {
-		treeBody += entry.String()
+	buf := bytes.NewBuffer(make([]byte, 0, 4096))
+	for _, e := range entries {
+		// fmt.Sprintf("%s %s\x00%s", e.Mode, e.Name, e.Hash)
+		buf.WriteString(e.Mode)
+		buf.WriteByte(' ')
+		buf.WriteString(e.Name)
+		buf.WriteByte('\x00')
+		buf.Write(e.Hash)
 	}
 
-	return bytes.NewBuffer([]byte(treeBody))
+	return buf
+}
+
+func (b *TreeBuilder) writeAndGetHash(objectType string, payloadSize int, payload io.Reader) []byte {
+	tmpf := files.CreateTempObjFile()
+	b.hash.Reset()
+	b.zw.Reset(tmpf)
+	mw := io.MultiWriter(b.hash, b.zw)
+	files.WriteGitObject(mw, objectType, payloadSize, payload)
+	b.zw.Close()
+	tmpf.Close()
+
+	hsum := b.hash.Sum(nil)
+	h := hex.EncodeToString(hsum)
+	objDirName, objFileName := hashes.DecomposeHash(h)
+	err := os.MkdirAll(fp.Join(git.GitObjDir, objDirName), 0775)
+	if err != nil && !errors.Is(err, fs.ErrExist) {
+		fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
+		os.Exit(1)
+	}
+
+	objFilePath := fp.Join(git.GitObjDir, objDirName, objFileName)
+	if err := os.Rename(tmpf.Name(), objFilePath); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating object: %v\n", err)
+		os.Exit(1)
+	}
+	return hsum
 }
