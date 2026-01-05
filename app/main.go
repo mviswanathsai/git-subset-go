@@ -315,7 +315,7 @@ func main() {
 			fmt.Printf("%s\t%s\n", line[:40], line[41:])
 		}
 
-	case "negotiate-refs":
+	case "clone":
 		// just get the references from a remote repo
 		repo := os.Args[2]
 		str := fmt.Sprintf("%s/info/refs?service=git-upload-pack", repo)
