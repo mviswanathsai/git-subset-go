@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -235,6 +236,13 @@ func main() {
 		// Open the file instead for comparison
 		pf, fileInfo := files.OpenFile(pfPath)
 
+		h := sha1.New()
+
+		if err := verifyPackTrailer(pf, fileInfo, h); err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid Pack: %v", err)
+			os.Exit(1)
+		}
+
 		br := bufio.NewReader(pf)
 		_, objCount, err := readPackHeader(br)
 		if err != nil {
@@ -248,46 +256,29 @@ func main() {
 			zr:  nil,
 			zbr: nil,
 		}
-        packOrder, packIndex := streamer.BuildPackIndex(objCount)
+		packOrder, packIndex := streamer.BuildPackIndex(objCount)
 
 		builder := &objectBuilder{
 			packIndex:   packIndex,
 			lookupCache: make(map[uint64]*ResolvedObject),
 			packOrder:   packOrder,
-			packLength:  objCount,
 			br:          br,
 			file:        pf,
 			fileInfo:    fileInfo,
 			zr:          nil,
-			hasher:      sha1.New(),
+			hasher:      h,
 		}
 
-
-		// At this point, only 20 bytes should be left
-		var fileHash []byte
-		bytesLeft := uint64(fileInfo.Size()) - currentOffset(pf, br)
-		if bytesLeft == 20 {
-			fileHash, _ = io.ReadAll(br)
-		} else {
-			fmt.Fprintf(os.Stderr, "Expected 20 bytes unread, got %d bytes", bytesLeft)
+		stats := &PackStats{
+			ChainCounts:   make(map[int]int),
+			NonDeltaCount: 0,
 		}
 
-		stats := builder.ComputePackStats()
-		for _, res := range stats.Results {
-			printResult(res)
-		}
+		builder.ForEachObject(stats.ProcessResult)
 
-		fmt.Printf("non delta: %d objects\n", stats.NonDeltaCount)
-		for depth := 1; ; depth++ {
-			count, exists := stats.ChainCounts[depth]
-			if !exists {
-				break
-			}
-			fmt.Printf("chain length = %d: %d objects\n", depth, count)
-		}
-		if verifyPackTrailer(pf, fileInfo, fileHash) {
-			fmt.Printf("%s: ok\n", pfPath)
-		}
+		stats.PrintSummary()
+
+		fmt.Printf("%s: ok\n", pfPath)
 
 	case "ls-remote":
 		// just get the references from a remote repo
@@ -431,7 +422,7 @@ func main() {
 		io.ReadFull(br, fileHash)
 		fileInfo, _ := os.Stat(tmp.Name())
 
-		if verifyPackTrailer(tmp, fileInfo, fileHash) {
+		if err := verifyPackTrailer(tmp, fileInfo, sha1.New()); err != nil {
 			fmt.Printf("%s: ok\n", tmp.Name())
 		} else {
 			fmt.Printf("%s: error\n", tmp.Name())
@@ -589,10 +580,11 @@ func main() {
 }
 
 type PackStreamer struct {
-	f   *os.File
-	br  *bufio.Reader
-	zr  io.ReadCloser
-	zbr *bufio.Reader
+	f     *os.File
+	fInfo os.FileInfo
+	br    *bufio.Reader
+	zr    io.ReadCloser
+	zbr   *bufio.Reader
 }
 
 func (streamer *PackStreamer) getZlibReader() *bufio.Reader {
@@ -834,6 +826,39 @@ func readPktLine(r io.Reader) ([]byte, error) {
 type PackStats struct {
 	NonDeltaCount int
 	ChainCounts   map[int]int
+}
+
+func (s *PackStats) ProcessResult(res *ObjectResult) {
+	printResult(res) // Print as we go
+	s.Observe(res)   // Update counters
+}
+
+func (s *PackStats) Observe(res *ObjectResult) {
+	if res.Depth == 0 {
+		s.NonDeltaCount++
+	} else {
+		s.ChainCounts[res.Depth]++
+	}
+}
+
+func (s *PackStats) PrintSummary() {
+	fmt.Printf("non delta: %d objects\n", s.NonDeltaCount)
+
+	depths := make([]int, 0, len(s.ChainCounts))
+	for d := range s.ChainCounts {
+		depths = append(depths, d)
+	}
+	sort.Ints(depths)
+
+	for _, d := range depths {
+		count := s.ChainCounts[d]
+		fmt.Printf("chain length = %d: %d objects\n", d, count)
+	}
+}
+
+type PackStatsCopy struct {
+	NonDeltaCount int
+	ChainCounts   map[int]int
 	Results       []*ObjectResult
 }
 
@@ -852,19 +877,35 @@ func readPackHeader(r io.Reader) (version, objectCount uint32, err error) {
 	return version, objectCount, nil
 }
 
-func verifyPackTrailer(f *os.File, fInfo os.FileInfo, fileHash []byte) bool {
-	f.Seek(0, 0)
-	h := sha1.New()
+func verifyPackTrailer(f *os.File, fInfo os.FileInfo, h hash.Hash) error {
+	defer h.Reset()
+	defer f.Seek(0, io.SeekStart)
+
+	if fInfo.Size() < 32 {
+		return fmt.Errorf("packfile is too small to be valid")
+	}
+
+	expected := make([]byte, 20)
+	_, err := f.ReadAt(expected, fInfo.Size()-20)
+	if err != nil {
+		return fmt.Errorf("failed to read expected trailer: %w", err)
+	}
+
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
 	lr := io.LimitReader(f, fInfo.Size()-20)
 
-	data, _ := io.Copy(h, lr)
-	if data < 20 {
-		os.Exit(1)
+	if _, err := io.Copy(h, lr); err != nil {
+		return fmt.Errorf("failed to hash pack content: %w", err)
 	}
 
 	actual := h.Sum(nil)
-
-	return bytes.Equal(fileHash, actual)
+	if !bytes.Equal(expected, actual) {
+		return fmt.Errorf("invalid packfile: checksum doesn't match")
+	}
+	return nil
 }
 
 func printResult(res *ObjectResult) {
@@ -907,8 +948,8 @@ type copyBuilder struct {
 }
 
 // TODO: add verification. This can only be run when some info about the pack is already known.
-func (builder *copyBuilder) ComputePackStats() PackStats {
-	stats := PackStats{
+func (builder *copyBuilder) ComputePackStats() PackStatsCopy {
+	stats := PackStatsCopy{
 		ChainCounts: make(map[int]int),
 		Results:     make([]*ObjectResult, 0, len(builder.packOrder)),
 	}
@@ -1140,26 +1181,19 @@ func (builder *copyBuilder) buildRepository(workingDir string, treeData []byte, 
 
 type objectBuilder struct {
 	packIndex   map[uint64]PackNode
-	packOrder   []uint64
-	packLength  uint32
 	lookupCache map[uint64]*ResolvedObject
 	hashMap     map[string]*ResolvedObject
+	packOrder   []uint64
 	file        *os.File
 	fileInfo    os.FileInfo
 	br          *bufio.Reader
 	zr          io.ReadCloser
-	zw          *zlib.Writer
 	hasher      hash.Hash
-	workingDir  string
+	packLength  uint32
 }
 
 // TODO: add verification. This can only be run when some info about the pack is already known.
-func (builder *objectBuilder) ComputePackStats() PackStats {
-	stats := PackStats{
-		ChainCounts: make(map[int]int),
-		Results:     make([]*ObjectResult, 0, len(builder.packOrder)),
-	}
-
+func (builder *objectBuilder) ForEachObject(fn func(res *ObjectResult)) {
 	for i, offset := range builder.packOrder {
 		node := builder.packIndex[offset]
 
@@ -1172,69 +1206,8 @@ func (builder *objectBuilder) ComputePackStats() PackStats {
 
 		result := builder.resolveObject(node, offset, nxtOfs)
 
-		// Collect results for printing later
-		stats.Results = append(stats.Results, result)
-
-		// Update stats
-		if result.Depth == 0 {
-			stats.NonDeltaCount++
-		} else {
-			stats.ChainCounts[result.Depth]++
-		}
+		fn(result)
 	}
-	return stats
-}
-
-func (builder *objectBuilder) BuildIndex() {
-	for i := 1; uint32(i) <= builder.packLength; i++ {
-		headerOfs := currentOffset(builder.file, builder.br)
-		objType, objSize := readObjHeader(builder.br)
-		builder.packOrder = append(builder.packOrder, headerOfs)
-
-		var parentOfs uint64
-		if objType == 6 {
-			// The required negative offet from the type byte
-			negOfs := readDeltaNegOfs(builder.br)
-			parentOfs = uint64(headerOfs) - negOfs
-		}
-
-		dataOfs := currentOffset(builder.file, builder.br)
-		if builder.zr == nil {
-			builder.zr, _ = zlib.NewReader(builder.br)
-		} else {
-			builder.zr.(zlib.Resetter).Reset(builder.br, nil)
-		}
-
-		if objType == 6 {
-			var buf bytes.Buffer
-			srcBufSize, dstBufSize, ops := parseDeltaObjCopy(&buf, builder.zr)
-			builder.packIndex[headerOfs] = &DeltaNode{
-				srcBufSize: srcBufSize,
-				dstBufSize: dstBufSize,
-				parentOfs:  parentOfs,
-				ops:        ops,
-				objSize:    objSize,
-				headerOfs:  headerOfs,
-			}
-		} else {
-			io.Copy(io.Discard, builder.zr)
-			builder.packIndex[headerOfs] = &ObjectNode{
-				objType:    objType,
-				objSize:    objSize,
-				headerOfs:  headerOfs,
-				dataOffset: dataOfs,
-			}
-		}
-	}
-}
-
-func (builder *objectBuilder) getZlibWriter(w io.Writer) *zlib.Writer {
-	if builder.zw == nil {
-		builder.zw = zlib.NewWriter(w)
-	} else {
-		builder.zw.Reset(w)
-	}
-	return builder.zw
 }
 
 func (builder *objectBuilder) Index() map[uint64]PackNode {
@@ -1453,10 +1426,10 @@ type PackNode interface {
 }
 
 type ObjectNode struct {
-	objType    uint8
 	objSize    uint64
 	headerOfs  uint64
 	dataOffset uint64 // The offset from the headerOfs to find the data, can be a maximum of 64 bits -> 8 bytes -> can be stored in uint8
+    objType    uint8
 }
 
 func (n *ObjectNode) Type() uint8 {
@@ -1479,9 +1452,9 @@ type DeltaNode struct {
 	srcBufSize uint64
 	dstBufSize uint64
 	parentOfs  uint64
-	ops        []DeltaOps
 	objSize    uint64
 	headerOfs  uint64
+    ops        []DeltaOps
 }
 
 func (n *DeltaNode) Type() uint8 {
@@ -1514,8 +1487,8 @@ func (CopyOp) kind() byte {
 }
 
 type InsertOp struct {
-	PayloadSize uint8
 	Payload     []byte
+    PayloadSize uint8
 }
 
 func (InsertOp) kind() byte {
