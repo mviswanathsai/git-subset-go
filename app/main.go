@@ -201,12 +201,11 @@ func main() {
 		timestamp := t.Unix()
 		offset := t.Format("-0700")
 
-        buf := new(bytes.Buffer)
+		buf := new(bytes.Buffer)
 		fmt.Fprintf(buf, "tree %s\n", treesha)
 		fmt.Fprintf(buf, "parent %s\n", commitsha)
 		fmt.Fprintf(buf, "author %s <%s> %d %s\n", author, email, timestamp, offset)
 		fmt.Fprintf(buf, "\n%s\n", message)
-
 
 		tmpf := files.CreateTempObjFile()
 		hash := sha1.New()
@@ -237,27 +236,32 @@ func main() {
 		pf, fileInfo := files.OpenFile(pfPath)
 
 		br := bufio.NewReader(pf)
-		_, nObj, err := readPackHeader(br)
+		_, objCount, err := readPackHeader(br)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Pack header invalid: %v", err)
 			os.Exit(1)
 		}
 
-		var zr io.ReadCloser
+		streamer := &PackStreamer{
+			f:   pf,
+			br:  br,
+			zr:  nil,
+			zbr: nil,
+		}
+        packOrder, packIndex := streamer.BuildPackIndex(objCount)
 
 		builder := &objectBuilder{
-			packIndex:   make(map[uint64]packNode),
+			packIndex:   packIndex,
 			lookupCache: make(map[uint64]*ResolvedObject),
-			packOrder:   make([]uint64, 0),
-			packLength:  nObj,
+			packOrder:   packOrder,
+			packLength:  objCount,
 			br:          br,
 			file:        pf,
 			fileInfo:    fileInfo,
-			zr:          zr,
+			zr:          nil,
 			hasher:      sha1.New(),
 		}
 
-		builder.BuildIndex()
 
 		// At this point, only 20 bytes should be left
 		var fileHash []byte
@@ -457,8 +461,8 @@ func main() {
 
 		var zr io.ReadCloser
 
-		builder := &objectBuilder{
-			packIndex:   make(map[uint64]packNode),
+		builder := &copyBuilder{
+			packIndex:   make(map[uint64]PackNode),
 			lookupCache: make(map[uint64]*ResolvedObject),
 			packOrder:   make([]uint64, 0),
 			hashMap:     make(map[string]*ResolvedObject),
@@ -584,6 +588,88 @@ func main() {
 	}
 }
 
+type PackStreamer struct {
+	f   *os.File
+	br  *bufio.Reader
+	zr  io.ReadCloser
+	zbr *bufio.Reader
+}
+
+func (streamer *PackStreamer) getZlibReader() *bufio.Reader {
+	if streamer.zr == nil {
+		streamer.zr, _ = zlib.NewReader(streamer.br)
+		streamer.zbr = bufio.NewReader(streamer.zr)
+	} else {
+		streamer.zr.(zlib.Resetter).Reset(streamer.br, nil)
+		streamer.zbr.Reset(streamer.zr)
+	}
+	return streamer.zbr
+}
+
+func (streamer *PackStreamer) BuildPackIndex(objectCount uint32) ([]uint64, map[uint64]PackNode) {
+	packOrder := make([]uint64, 0, objectCount)
+	packIndex := make(map[uint64]PackNode)
+	for i := 1; uint32(i) <= objectCount; i++ {
+		headerOfs := currentOffset(streamer.f, streamer.br)
+		objType, objSize := readObjHeader(streamer.br)
+		packOrder = append(packOrder, headerOfs)
+
+		var parentOfs uint64
+		if objType == 6 {
+			// The required negative offet brom the type byte
+			negOfs := readDeltaNegOfs(streamer.br)
+			parentOfs = uint64(headerOfs) - negOfs
+		}
+
+		dataOfs := currentOffset(streamer.f, streamer.br)
+
+		if objType == 6 {
+			srcBufSize, dstBufSize, ops := streamer.parseDeltaObj()
+			packIndex[headerOfs] = &DeltaNode{
+				srcBufSize: srcBufSize,
+				dstBufSize: dstBufSize,
+				parentOfs:  parentOfs,
+				ops:        ops,
+				objSize:    objSize,
+				headerOfs:  headerOfs,
+			}
+		} else {
+			io.Copy(io.Discard, streamer.getZlibReader())
+			packIndex[headerOfs] = &ObjectNode{
+				objType:    objType,
+				objSize:    objSize,
+				headerOfs:  headerOfs,
+				dataOffset: dataOfs,
+			}
+		}
+	}
+	return packOrder, packIndex
+}
+
+func (streamer *PackStreamer) parseDeltaObj() (srcBufSize, dstBufSize uint64, ops []DeltaOps) {
+	zbr := streamer.getZlibReader()
+	srcSize, dstSize := readDeltaHeader(zbr)
+	for {
+		b, err := zbr.ReadByte()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if b&0x80 != 0 {
+			copyOfsFlags := (b & git.CopyOffsetFlagsMask)
+			copySizeFlags := (b & git.CopySizeFlagsMask) >> git.CopySizeFlagsShift
+			ofs := readDeltaCopyOffset(copyOfsFlags, zbr)
+			size := readDeltaCopySize(copySizeFlags, zbr)
+			ops = append(ops, CopyOp{Offset: ofs, Size: size})
+		} else {
+			payloadSize := (b & git.InsertSizeMask)
+			insertPayloadBuf := make([]byte, payloadSize)
+			io.ReadFull(zbr, insertPayloadBuf)
+			ops = append(ops, InsertOp{PayloadSize: payloadSize, Payload: insertPayloadBuf})
+		}
+	}
+	return srcSize, dstSize, ops
+}
+
 type IndexEntry struct {
 	CtimeSec  uint32
 	CtimeNano uint32
@@ -625,54 +711,6 @@ func writeGitIndexLine(e *IndexEntry, w io.Writer) {
 		padding = 8
 	}
 	w.Write(make([]byte, padding))
-}
-
-func (builder *objectBuilder) checkoutRepository(headSHA []byte) *checkoutResult {
-	result := &checkoutResult{indexEntries: make([]*IndexEntry, 0, 32)}
-	headCommit := builder.hashMap[string(headSHA)]
-	treeSHA := returnCommitTreeSHA(headCommit.Data)
-	treeData := builder.hashMap[treeSHA].Data
-	builder.buildRepository("", treeData, result)
-	return result
-}
-
-// When I see a tree:
-// 1. I need to create a directory for it.
-// 2. I need to parse the contents of the tree into it's own directory
-// 3. Repeat
-func (builder *objectBuilder) buildRepository(workingDir string, treeData []byte, result *checkoutResult) {
-	treeEntries := parseTree(treeData)
-	for _, treeEntry := range treeEntries {
-		if treeEntry.mode != git.GitDirMode {
-			// write the files
-			filepath := fp.Join(workingDir, treeEntry.name)
-			os.WriteFile(filepath, builder.hashMap[treeEntry.sha1].Data, TranslateGitMode(treeEntry.mode))
-			fileInfo, _ := os.Lstat(filepath)
-			shaBytes, _ := hex.DecodeString(treeEntry.sha1)
-			stat := fileInfo.Sys().(*syscall.Stat_t)
-			lengthFlag := min(len(filepath), 0x0FFF)
-			result.indexEntries = append(result.indexEntries, &IndexEntry{
-				CtimeSec:  uint32(stat.Ctim.Sec),
-				CtimeNano: uint32(stat.Ctim.Nsec),
-				MtimeSec:  uint32(stat.Mtim.Sec),
-				MtimeNano: uint32(stat.Mtim.Nsec),
-				Dev:       uint32(stat.Dev),
-				Ino:       uint32(stat.Ino),
-				Mode:      uint32(TranslateGitModeToUint(treeEntry.mode)),
-				UID:       uint32(stat.Uid),
-				GID:       uint32(stat.Gid),
-				Size:      uint32(fileInfo.Size()),
-				SHA:       [20]byte(shaBytes),
-				Flags:     uint16(lengthFlag),
-				Path:      filepath,
-			})
-		} else {
-			curDir := fp.Join(workingDir, treeEntry.name)
-			os.MkdirAll(curDir, 0755)
-			treeData := builder.hashMap[treeEntry.sha1].Data
-			builder.buildRepository(fp.Join(workingDir, treeEntry.name), treeData, result)
-		}
-	}
 }
 
 func TranslateGitModeToUint(gitMode string) uint32 {
@@ -793,88 +831,13 @@ func readPktLine(r io.Reader) ([]byte, error) {
 	return bytes.TrimRight(out, "\n\x00"), nil
 }
 
-// TODO: add verification. This can only be run when some info about the pack is already known.
-func (builder *objectBuilder) ComputePackStats() PackStats {
-	stats := PackStats{
-		ChainCounts: make(map[int]int),
-		Results:     make([]*ObjectResult, 0, len(builder.packOrder)),
-	}
-
-	for i, offset := range builder.packOrder {
-		node := builder.packIndex[offset]
-
-		var nxtOfs uint64
-		if i < len(builder.packOrder)-1 {
-			nxtOfs = builder.packOrder[i+1]
-		} else {
-			nxtOfs = uint64(builder.fileInfo.Size() - 20)
-		}
-
-		result := builder.resolveObject(node, offset, nxtOfs)
-
-		// Collect results for printing later
-		stats.Results = append(stats.Results, result)
-
-		// Update stats
-		if result.Depth == 0 {
-			stats.NonDeltaCount++
-		} else {
-			stats.ChainCounts[result.Depth]++
-		}
-	}
-	return stats
-}
-
 type PackStats struct {
 	NonDeltaCount int
 	ChainCounts   map[int]int
 	Results       []*ObjectResult
 }
 
-func (builder *objectBuilder) BuildIndex() {
-	for i := 1; uint32(i) <= builder.packLength; i++ {
-		headerOfs := currentOffset(builder.file, builder.br)
-		objType, objSize := readObjHeader(builder.br)
-		builder.packOrder = append(builder.packOrder, headerOfs)
-
-		var parentOfs uint64
-		if objType == 6 {
-			// The required negative offet from the type byte
-			negOfs := readDeltaNegOfs(builder.br)
-			parentOfs = uint64(headerOfs) - negOfs
-		}
-
-		dataOfs := currentOffset(builder.file, builder.br)
-		if builder.zr == nil {
-			builder.zr, _ = zlib.NewReader(builder.br)
-		} else {
-			builder.zr.(zlib.Resetter).Reset(builder.br, nil)
-		}
-
-		if objType == 6 {
-			var buf bytes.Buffer
-			srcBufSize, dstBufSize, ops := parseDeltaObj(&buf, builder.zr)
-			builder.packIndex[headerOfs] = &deltaNode{
-				srcBufSize: srcBufSize,
-				dstBufSize: dstBufSize,
-				parentOfs:  parentOfs,
-				ops:        ops,
-				objSize:    objSize,
-				headerOfs:  headerOfs,
-			}
-		} else {
-			io.Copy(io.Discard, builder.zr)
-			builder.packIndex[headerOfs] = &objectNode{
-				objType:    objType,
-				objSize:    objSize,
-				headerOfs:  headerOfs,
-				dataOffset: dataOfs,
-			}
-		}
-	}
-}
-
-func readPackHeader(r io.Reader) (uint32, uint32, error) {
+func readPackHeader(r io.Reader) (version, objectCount uint32, err error) {
 	buf := make([]byte, 12)
 
 	// Discard the first 4 bytes
@@ -884,9 +847,9 @@ func readPackHeader(r io.Reader) (uint32, uint32, error) {
 		return 0, 0, fmt.Errorf("not a valid pack file")
 	}
 	// Read the version and the nobjects
-	version := binary.BigEndian.Uint32(buf[4:8])
-	nObj := binary.BigEndian.Uint32(buf[8:12])
-	return version, nObj, nil
+	version = binary.BigEndian.Uint32(buf[4:8])
+	objectCount = binary.BigEndian.Uint32(buf[8:12])
+	return version, objectCount, nil
 }
 
 func verifyPackTrailer(f *os.File, fInfo os.FileInfo, fileHash []byte) bool {
@@ -928,8 +891,8 @@ func printResult(res *ObjectResult) {
 	}
 }
 
-type objectBuilder struct {
-	packIndex   map[uint64]packNode
+type copyBuilder struct {
+	packIndex   map[uint64]PackNode
 	packOrder   []uint64
 	packLength  uint32
 	lookupCache map[uint64]*ResolvedObject
@@ -943,7 +906,82 @@ type objectBuilder struct {
 	workingDir  string
 }
 
-func (builder *objectBuilder) getZlibWriter(w io.Writer) *zlib.Writer {
+// TODO: add verification. This can only be run when some info about the pack is already known.
+func (builder *copyBuilder) ComputePackStats() PackStats {
+	stats := PackStats{
+		ChainCounts: make(map[int]int),
+		Results:     make([]*ObjectResult, 0, len(builder.packOrder)),
+	}
+
+	for i, offset := range builder.packOrder {
+		node := builder.packIndex[offset]
+
+		var nxtOfs uint64
+		if i < len(builder.packOrder)-1 {
+			nxtOfs = builder.packOrder[i+1]
+		} else {
+			nxtOfs = uint64(builder.fileInfo.Size() - 20)
+		}
+
+		result := builder.resolveObject(node, offset, nxtOfs)
+
+		// Collect results for printing later
+		stats.Results = append(stats.Results, result)
+
+		// Update stats
+		if result.Depth == 0 {
+			stats.NonDeltaCount++
+		} else {
+			stats.ChainCounts[result.Depth]++
+		}
+	}
+	return stats
+}
+
+func (builder *copyBuilder) BuildIndex() {
+	for i := 1; uint32(i) <= builder.packLength; i++ {
+		headerOfs := currentOffset(builder.file, builder.br)
+		objType, objSize := readObjHeader(builder.br)
+		builder.packOrder = append(builder.packOrder, headerOfs)
+
+		var parentOfs uint64
+		if objType == 6 {
+			// The required negative offet from the type byte
+			negOfs := readDeltaNegOfs(builder.br)
+			parentOfs = uint64(headerOfs) - negOfs
+		}
+
+		dataOfs := currentOffset(builder.file, builder.br)
+		if builder.zr == nil {
+			builder.zr, _ = zlib.NewReader(builder.br)
+		} else {
+			builder.zr.(zlib.Resetter).Reset(builder.br, nil)
+		}
+
+		if objType == 6 {
+			var buf bytes.Buffer
+			srcBufSize, dstBufSize, ops := parseDeltaObjCopy(&buf, builder.zr)
+			builder.packIndex[headerOfs] = &DeltaNode{
+				srcBufSize: srcBufSize,
+				dstBufSize: dstBufSize,
+				parentOfs:  parentOfs,
+				ops:        ops,
+				objSize:    objSize,
+				headerOfs:  headerOfs,
+			}
+		} else {
+			io.Copy(io.Discard, builder.zr)
+			builder.packIndex[headerOfs] = &ObjectNode{
+				objType:    objType,
+				objSize:    objSize,
+				headerOfs:  headerOfs,
+				dataOffset: dataOfs,
+			}
+		}
+	}
+}
+
+func (builder *copyBuilder) getZlibWriter(w io.Writer) *zlib.Writer {
 	if builder.zw == nil {
 		builder.zw = zlib.NewWriter(w)
 	} else {
@@ -952,11 +990,11 @@ func (builder *objectBuilder) getZlibWriter(w io.Writer) *zlib.Writer {
 	return builder.zw
 }
 
-func (builder *objectBuilder) Index() map[uint64]packNode {
+func (builder *copyBuilder) Index() map[uint64]PackNode {
 	return builder.packIndex
 }
 
-func (builder *objectBuilder) resolveObject(n packNode, currHeaderOfs, nxtHeaderOfs uint64) *ObjectResult {
+func (builder *copyBuilder) resolveObject(n PackNode, currHeaderOfs, nxtHeaderOfs uint64) *ObjectResult {
 	resolvedObject := builder.buildObject(n)
 	return &ObjectResult{
 		SHA1:       resolvedObject.SHA1,
@@ -969,29 +1007,254 @@ func (builder *objectBuilder) resolveObject(n packNode, currHeaderOfs, nxtHeader
 	}
 }
 
-type ObjectResult struct {
-	SHA1       string
-	Type       uint8
-	Size       uint64 // The uncompressed size of the object payload
-	PackSize   uint64
-	Offset     uint64
-	Depth      int
-	ParentSHA1 string
+func (builder *copyBuilder) resolveDelta(n *DeltaNode) *ResolvedObject {
+	parentResolvedObject := builder.buildObject(builder.Index()[n.ParentOffset()])
+	depth := parentResolvedObject.Depth + 1
+	baseType := parentResolvedObject.Type
+	data := applyDelta(n, parentResolvedObject.Data)
+	hash := builder.ReturnObjectSHA(data, int64(len(data)), baseType)
+	res := &ResolvedObject{
+		SHA1:       hash,
+		Depth:      depth,
+		ParentSHA1: parentResolvedObject.SHA1,
+		Type:       baseType,
+		Data:       data,
+	}
+	return res
 }
 
-func (res *ObjectResult) TypeName() []byte {
-	return TypeToBytes(res.Type)
+func (builder *copyBuilder) ReturnObjectSHA(data []byte, size int64, objType uint8) string {
+	if builder.hasher == nil {
+		builder.hasher = sha1.New()
+	} else {
+		builder.hasher.Reset()
+	}
+	sha := sha1.New()
+	sha.Write(TypeToBytes(objType))
+	sha.Write([]byte(" "))
+	sha.Write([]byte(strconv.FormatInt(int64(len(data)), 10)))
+	sha.Write([]byte{0})
+	sha.Write(data)
+
+	h := hex.EncodeToString(sha.Sum(nil))
+	return h
 }
 
-type ResolvedObject struct {
-	SHA1       string
-	Type       uint8
-	Depth      int
-	ParentSHA1 string
-	Data       []byte
+func (builder *copyBuilder) resolveBase(n *ObjectNode) *ResolvedObject {
+	data := builder.readObjectData(n)
+	hash := builder.ReturnObjectSHA(data, int64(n.objSize), n.objType)
+	objType := n.Type()
+	depth := 0
+	res := &ResolvedObject{
+		SHA1:       hash,
+		Depth:      depth,
+		ParentSHA1: "",
+		Type:       objType,
+		Data:       data,
+	}
+	return res
 }
 
-func (builder *objectBuilder) resolveDelta(n *deltaNode) *ResolvedObject {
+func (builder *copyBuilder) buildObject(n PackNode) *ResolvedObject {
+	if cached, ok := builder.lookupCache[n.Offset()]; ok {
+		return cached
+	}
+
+	var res *ResolvedObject
+
+	switch Type := n.Type(); Type {
+	case 6:
+		res = builder.resolveDelta(n.(*DeltaNode))
+	default:
+		res = builder.resolveBase(n.(*ObjectNode))
+	}
+	builder.lookupCache[n.Offset()] = res
+
+	return res
+}
+
+func (builder *copyBuilder) readObjectData(n *ObjectNode) []byte {
+	f := builder.file
+	br := builder.br
+	f.Seek(int64(n.dataOffset), 0)
+	br.Reset(f)
+	if builder.zr == nil {
+		builder.zr, _ = zlib.NewReader(builder.br)
+	} else {
+		if reseter, ok := builder.zr.(zlib.Resetter); ok {
+			reseter.Reset(builder.br, nil)
+		}
+	}
+	buf := make([]byte, n.ObjectSize())
+	io.ReadFull(builder.zr, buf)
+	return buf
+}
+
+func (builder *copyBuilder) checkoutRepository(headSHA []byte) *checkoutResult {
+	result := &checkoutResult{indexEntries: make([]*IndexEntry, 0, 32)}
+	headCommit := builder.hashMap[string(headSHA)]
+	treeSHA := returnCommitTreeSHA(headCommit.Data)
+	treeData := builder.hashMap[treeSHA].Data
+	builder.buildRepository("", treeData, result)
+	return result
+}
+
+// When I see a tree:
+// 1. I need to create a directory for it.
+// 2. I need to parse the contents of the tree into it's own directory
+// 3. Repeat
+func (builder *copyBuilder) buildRepository(workingDir string, treeData []byte, result *checkoutResult) {
+	treeEntries := parseTree(treeData)
+	for _, treeEntry := range treeEntries {
+		if treeEntry.mode != git.GitDirMode {
+			// write the files
+			filepath := fp.Join(workingDir, treeEntry.name)
+			os.WriteFile(filepath, builder.hashMap[treeEntry.sha1].Data, TranslateGitMode(treeEntry.mode))
+			fileInfo, _ := os.Lstat(filepath)
+			shaBytes, _ := hex.DecodeString(treeEntry.sha1)
+			stat := fileInfo.Sys().(*syscall.Stat_t)
+			lengthFlag := min(len(filepath), 0x0FFF)
+			result.indexEntries = append(result.indexEntries, &IndexEntry{
+				CtimeSec:  uint32(stat.Ctim.Sec),
+				CtimeNano: uint32(stat.Ctim.Nsec),
+				MtimeSec:  uint32(stat.Mtim.Sec),
+				MtimeNano: uint32(stat.Mtim.Nsec),
+				Dev:       uint32(stat.Dev),
+				Ino:       uint32(stat.Ino),
+				Mode:      uint32(TranslateGitModeToUint(treeEntry.mode)),
+				UID:       uint32(stat.Uid),
+				GID:       uint32(stat.Gid),
+				Size:      uint32(fileInfo.Size()),
+				SHA:       [20]byte(shaBytes),
+				Flags:     uint16(lengthFlag),
+				Path:      filepath,
+			})
+		} else {
+			curDir := fp.Join(workingDir, treeEntry.name)
+			os.MkdirAll(curDir, 0755)
+			treeData := builder.hashMap[treeEntry.sha1].Data
+			builder.buildRepository(fp.Join(workingDir, treeEntry.name), treeData, result)
+		}
+	}
+}
+
+type objectBuilder struct {
+	packIndex   map[uint64]PackNode
+	packOrder   []uint64
+	packLength  uint32
+	lookupCache map[uint64]*ResolvedObject
+	hashMap     map[string]*ResolvedObject
+	file        *os.File
+	fileInfo    os.FileInfo
+	br          *bufio.Reader
+	zr          io.ReadCloser
+	zw          *zlib.Writer
+	hasher      hash.Hash
+	workingDir  string
+}
+
+// TODO: add verification. This can only be run when some info about the pack is already known.
+func (builder *objectBuilder) ComputePackStats() PackStats {
+	stats := PackStats{
+		ChainCounts: make(map[int]int),
+		Results:     make([]*ObjectResult, 0, len(builder.packOrder)),
+	}
+
+	for i, offset := range builder.packOrder {
+		node := builder.packIndex[offset]
+
+		var nxtOfs uint64
+		if i < len(builder.packOrder)-1 {
+			nxtOfs = builder.packOrder[i+1]
+		} else {
+			nxtOfs = uint64(builder.fileInfo.Size() - 20)
+		}
+
+		result := builder.resolveObject(node, offset, nxtOfs)
+
+		// Collect results for printing later
+		stats.Results = append(stats.Results, result)
+
+		// Update stats
+		if result.Depth == 0 {
+			stats.NonDeltaCount++
+		} else {
+			stats.ChainCounts[result.Depth]++
+		}
+	}
+	return stats
+}
+
+func (builder *objectBuilder) BuildIndex() {
+	for i := 1; uint32(i) <= builder.packLength; i++ {
+		headerOfs := currentOffset(builder.file, builder.br)
+		objType, objSize := readObjHeader(builder.br)
+		builder.packOrder = append(builder.packOrder, headerOfs)
+
+		var parentOfs uint64
+		if objType == 6 {
+			// The required negative offet from the type byte
+			negOfs := readDeltaNegOfs(builder.br)
+			parentOfs = uint64(headerOfs) - negOfs
+		}
+
+		dataOfs := currentOffset(builder.file, builder.br)
+		if builder.zr == nil {
+			builder.zr, _ = zlib.NewReader(builder.br)
+		} else {
+			builder.zr.(zlib.Resetter).Reset(builder.br, nil)
+		}
+
+		if objType == 6 {
+			var buf bytes.Buffer
+			srcBufSize, dstBufSize, ops := parseDeltaObjCopy(&buf, builder.zr)
+			builder.packIndex[headerOfs] = &DeltaNode{
+				srcBufSize: srcBufSize,
+				dstBufSize: dstBufSize,
+				parentOfs:  parentOfs,
+				ops:        ops,
+				objSize:    objSize,
+				headerOfs:  headerOfs,
+			}
+		} else {
+			io.Copy(io.Discard, builder.zr)
+			builder.packIndex[headerOfs] = &ObjectNode{
+				objType:    objType,
+				objSize:    objSize,
+				headerOfs:  headerOfs,
+				dataOffset: dataOfs,
+			}
+		}
+	}
+}
+
+func (builder *objectBuilder) getZlibWriter(w io.Writer) *zlib.Writer {
+	if builder.zw == nil {
+		builder.zw = zlib.NewWriter(w)
+	} else {
+		builder.zw.Reset(w)
+	}
+	return builder.zw
+}
+
+func (builder *objectBuilder) Index() map[uint64]PackNode {
+	return builder.packIndex
+}
+
+func (builder *objectBuilder) resolveObject(n PackNode, currHeaderOfs, nxtHeaderOfs uint64) *ObjectResult {
+	resolvedObject := builder.buildObject(n)
+	return &ObjectResult{
+		SHA1:       resolvedObject.SHA1,
+		Type:       resolvedObject.Type,
+		Size:       n.ObjectSize(),
+		PackSize:   nxtHeaderOfs - currHeaderOfs,
+		Offset:     currHeaderOfs,
+		ParentSHA1: resolvedObject.ParentSHA1,
+		Depth:      resolvedObject.Depth,
+	}
+}
+
+func (builder *objectBuilder) resolveDelta(n *DeltaNode) *ResolvedObject {
 	parentResolvedObject := builder.buildObject(builder.Index()[n.ParentOffset()])
 	depth := parentResolvedObject.Depth + 1
 	baseType := parentResolvedObject.Type
@@ -1024,7 +1287,7 @@ func (builder *objectBuilder) ReturnObjectSHA(data []byte, size int64, objType u
 	return h
 }
 
-func (builder *objectBuilder) resolveBase(n *objectNode) *ResolvedObject {
+func (builder *objectBuilder) resolveBase(n *ObjectNode) *ResolvedObject {
 	data := builder.readObjectData(n)
 	hash := builder.ReturnObjectSHA(data, int64(n.objSize), n.objType)
 	objType := n.Type()
@@ -1039,7 +1302,7 @@ func (builder *objectBuilder) resolveBase(n *objectNode) *ResolvedObject {
 	return res
 }
 
-func (builder *objectBuilder) buildObject(n packNode) *ResolvedObject {
+func (builder *objectBuilder) buildObject(n PackNode) *ResolvedObject {
 	if cached, ok := builder.lookupCache[n.Offset()]; ok {
 		return cached
 	}
@@ -1048,16 +1311,16 @@ func (builder *objectBuilder) buildObject(n packNode) *ResolvedObject {
 
 	switch Type := n.Type(); Type {
 	case 6:
-		res = builder.resolveDelta(n.(*deltaNode))
+		res = builder.resolveDelta(n.(*DeltaNode))
 	default:
-		res = builder.resolveBase(n.(*objectNode))
+		res = builder.resolveBase(n.(*ObjectNode))
 	}
 	builder.lookupCache[n.Offset()] = res
 
 	return res
 }
 
-func (builder *objectBuilder) readObjectData(n *objectNode) []byte {
+func (builder *objectBuilder) readObjectData(n *ObjectNode) []byte {
 	f := builder.file
 	br := builder.br
 	f.Seek(int64(n.dataOffset), 0)
@@ -1074,7 +1337,77 @@ func (builder *objectBuilder) readObjectData(n *objectNode) []byte {
 	return buf
 }
 
-func applyDelta(d *deltaNode, srcBuf []byte) []byte {
+func (builder *objectBuilder) checkoutRepository(headSHA []byte) *checkoutResult {
+	result := &checkoutResult{indexEntries: make([]*IndexEntry, 0, 32)}
+	headCommit := builder.hashMap[string(headSHA)]
+	treeSHA := returnCommitTreeSHA(headCommit.Data)
+	treeData := builder.hashMap[treeSHA].Data
+	builder.buildRepository("", treeData, result)
+	return result
+}
+
+// When I see a tree:
+// 1. I need to create a directory for it.
+// 2. I need to parse the contents of the tree into it's own directory
+// 3. Repeat
+func (builder *objectBuilder) buildRepository(workingDir string, treeData []byte, result *checkoutResult) {
+	treeEntries := parseTree(treeData)
+	for _, treeEntry := range treeEntries {
+		if treeEntry.mode != git.GitDirMode {
+			// write the files
+			filepath := fp.Join(workingDir, treeEntry.name)
+			os.WriteFile(filepath, builder.hashMap[treeEntry.sha1].Data, TranslateGitMode(treeEntry.mode))
+			fileInfo, _ := os.Lstat(filepath)
+			shaBytes, _ := hex.DecodeString(treeEntry.sha1)
+			stat := fileInfo.Sys().(*syscall.Stat_t)
+			lengthFlag := min(len(filepath), 0x0FFF)
+			result.indexEntries = append(result.indexEntries, &IndexEntry{
+				CtimeSec:  uint32(stat.Ctim.Sec),
+				CtimeNano: uint32(stat.Ctim.Nsec),
+				MtimeSec:  uint32(stat.Mtim.Sec),
+				MtimeNano: uint32(stat.Mtim.Nsec),
+				Dev:       uint32(stat.Dev),
+				Ino:       uint32(stat.Ino),
+				Mode:      uint32(TranslateGitModeToUint(treeEntry.mode)),
+				UID:       uint32(stat.Uid),
+				GID:       uint32(stat.Gid),
+				Size:      uint32(fileInfo.Size()),
+				SHA:       [20]byte(shaBytes),
+				Flags:     uint16(lengthFlag),
+				Path:      filepath,
+			})
+		} else {
+			curDir := fp.Join(workingDir, treeEntry.name)
+			os.MkdirAll(curDir, 0755)
+			treeData := builder.hashMap[treeEntry.sha1].Data
+			builder.buildRepository(fp.Join(workingDir, treeEntry.name), treeData, result)
+		}
+	}
+}
+
+type ObjectResult struct {
+	SHA1       string
+	Type       uint8
+	Size       uint64 // The uncompressed size of the object payload
+	PackSize   uint64
+	Offset     uint64
+	Depth      int
+	ParentSHA1 string
+}
+
+func (res *ObjectResult) TypeName() []byte {
+	return TypeToBytes(res.Type)
+}
+
+type ResolvedObject struct {
+	SHA1       string
+	Type       uint8
+	Depth      int
+	ParentSHA1 string
+	Data       []byte
+}
+
+func applyDelta(d *DeltaNode, srcBuf []byte) []byte {
 	if len(srcBuf) != int(d.srcBufSize) {
 		fmt.Fprintf(os.Stderr, "Unexepected src buffer size")
 		os.Exit(1)
@@ -1112,37 +1445,37 @@ func currentOffset(f *os.File, br *bufio.Reader) uint64 {
 	return uint64(currOfs)
 }
 
-type packNode interface {
+type PackNode interface {
 	Type() uint8
 	ParentOffset() uint64
 	ObjectSize() uint64
 	Offset() uint64
 }
 
-type objectNode struct {
+type ObjectNode struct {
 	objType    uint8
 	objSize    uint64
 	headerOfs  uint64
 	dataOffset uint64 // The offset from the headerOfs to find the data, can be a maximum of 64 bits -> 8 bytes -> can be stored in uint8
 }
 
-func (n *objectNode) Type() uint8 {
+func (n *ObjectNode) Type() uint8 {
 	return n.objType
 }
 
-func (n *objectNode) ParentOffset() uint64 {
+func (n *ObjectNode) ParentOffset() uint64 {
 	return 0
 }
 
-func (n *objectNode) Offset() uint64 {
+func (n *ObjectNode) Offset() uint64 {
 	return n.headerOfs
 }
 
-func (n *objectNode) ObjectSize() uint64 {
+func (n *ObjectNode) ObjectSize() uint64 {
 	return n.objSize
 }
 
-type deltaNode struct {
+type DeltaNode struct {
 	srcBufSize uint64
 	dstBufSize uint64
 	parentOfs  uint64
@@ -1151,19 +1484,19 @@ type deltaNode struct {
 	headerOfs  uint64
 }
 
-func (n *deltaNode) Type() uint8 {
+func (n *DeltaNode) Type() uint8 {
 	return git.OBJ_OFS_DELTA
 }
 
-func (n *deltaNode) ParentOffset() uint64 {
+func (n *DeltaNode) ParentOffset() uint64 {
 	return n.parentOfs
 }
 
-func (n *deltaNode) ObjectSize() uint64 {
+func (n *DeltaNode) ObjectSize() uint64 {
 	return n.objSize
 }
 
-func (n *deltaNode) Offset() uint64 {
+func (n *DeltaNode) Offset() uint64 {
 	return n.headerOfs
 }
 
@@ -1189,41 +1522,25 @@ func (InsertOp) kind() byte {
 	return OP_COPE_INSERT
 }
 
-func parseDeltaObj(buf *bytes.Buffer, zr io.ReadCloser) (srcBufSize, dstBufSize uint64, ops []DeltaOps) {
-	// mw := io.MultiWriter(dstWriter, &buf)
+func parseDeltaObjCopy(buf *bytes.Buffer, zr io.ReadCloser) (srcBufSize, dstBufSize uint64, ops []DeltaOps) {
 	io.Copy(buf, zr)
-	srcSize, dstSize := readDeltaHeader(buf)
-	////fmt.Fprintf(dstWriter, "\n")
-	////fmt.Fprintf(dstWriter, "src buffer size:%d\ndst buffer size:%d\n", srcSize, dstSize)
-	////fmt.Fprintf(dstWriter, "\n")
+	srcSize, dstSize := readDeltaHeaderCopy(buf)
 
 	for buf.Len() != 0 {
 		b, _ := (buf).ReadByte()
 		if b&0x80 != 0 {
-			//fmt.Fprintf(dstWriter, "Copy instruction\n")
 			copyOfsFlags := (b & git.CopyOffsetFlagsMask)
 			copySizeFlags := (b & git.CopySizeFlagsMask) >> git.CopySizeFlagsShift
-			ofs := readDeltaCopyOffset(copyOfsFlags, buf)
-			size := readDeltaCopySize(copySizeFlags, buf)
-			////fmt.Fprintf(dstWriter, "The copy header byte is: %b\n", b)
-			////fmt.Fprintf(dstWriter, "The copy size is: %d\n", size)
-			////fmt.Fprintf(dstWriter, "The copy offset is: %d\n", ofs)
-			////fmt.Fprintf(dstWriter, "\n")
+			ofs := readDeltaCopyOffsetCopy(copyOfsFlags, buf)
+			size := readDeltaCopySizeCopy(copySizeFlags, buf)
 			ops = append(ops, CopyOp{Offset: ofs, Size: size})
 		} else {
-			// fmt.Fprintf(dstWriter, "Insert instruction\n")
 			payloadSize := (b & git.InsertSizeMask)
-			//fmt.Fprintf(dstWriter, "The insert header byte is: %b\n", b)
-			// fmt.Fprintf(dstWriter, "The insert size is: %d\n", payloadSize)
 			insertPayloadBuf := make([]byte, payloadSize)
 			io.ReadFull(buf, insertPayloadBuf)
-			////fmt.Fprintf(dstWriter, "The insert payload is: %s\n", insertPayloadBuf)
-			////fmt.Fprintf(dstWriter, "\n")
 			ops = append(ops, InsertOp{PayloadSize: payloadSize, Payload: insertPayloadBuf})
 		}
 	}
-	//io.Copy(dstWriter, buf)
-	//fmt.Fprintf(dstWriter, "\n")
 	return srcSize, dstSize, ops
 }
 
@@ -1248,13 +1565,19 @@ func readObjHeader(br *bufio.Reader) (byte, uint64) {
 }
 
 // There are two sizes to read
-func readDeltaHeader(buf *bytes.Buffer) (srcSize uint64, dstSize uint64) {
-	srcSize = readDeltaSize(buf)
-	dstSize = readDeltaSize(buf)
+func readDeltaHeader(r *bufio.Reader) (srcSize uint64, dstSize uint64) {
+	srcSize = readDeltaSize(r)
+	dstSize = readDeltaSize(r)
 	return srcSize, dstSize
 }
 
-func readDeltaSize(buf *bytes.Buffer) uint64 {
+func readDeltaHeaderCopy(buf *bytes.Buffer) (srcSize uint64, dstSize uint64) {
+	srcSize = readDeltaSizeCopy(buf)
+	dstSize = readDeltaSizeCopy(buf)
+	return srcSize, dstSize
+}
+
+func readDeltaSizeCopy(buf *bytes.Buffer) uint64 {
 	var i uint64
 	var size uint64
 	i++
@@ -1269,7 +1592,22 @@ func readDeltaSize(buf *bytes.Buffer) uint64 {
 	return size
 }
 
-func readDeltaCopyOffset(ofsFlags byte, br *bytes.Buffer) (ofs uint64) {
+func readDeltaSize(r *bufio.Reader) uint64 {
+	var i uint64
+	var size uint64
+	i++
+	for {
+		b, _ := r.ReadByte()
+		size = uint64(b&0b01111111)<<((i-1)*7) | size
+		if b&0x80 == 0 {
+			break
+		}
+		i++
+	}
+	return size
+}
+
+func readDeltaCopyOffset(ofsFlags byte, br *bufio.Reader) (ofs uint64) {
 	for i := range git.CopyOffsetFlagsLen {
 		if (0b00000001 & (ofsFlags >> i)) == 1 {
 			b, _ := br.ReadByte()
@@ -1279,7 +1617,30 @@ func readDeltaCopyOffset(ofsFlags byte, br *bytes.Buffer) (ofs uint64) {
 	return ofs
 }
 
-func readDeltaCopySize(sizeFlags byte, br *bytes.Buffer) (size uint64) {
+func readDeltaCopySize(sizeFlags byte, br *bufio.Reader) (size uint64) {
+	for i := range git.CopySizeFlagsLen {
+		if (0b00000001 & (sizeFlags >> i)) == 1 {
+			b, _ := br.ReadByte()
+			size |= uint64(b) << (8 * i)
+		}
+	}
+	if size == 0 {
+		return git.CopySizeZero
+	}
+	return size
+}
+
+func readDeltaCopyOffsetCopy(ofsFlags byte, br *bytes.Buffer) (ofs uint64) {
+	for i := range git.CopyOffsetFlagsLen {
+		if (0b00000001 & (ofsFlags >> i)) == 1 {
+			b, _ := br.ReadByte()
+			ofs |= uint64(b) << (8 * i)
+		}
+	}
+	return ofs
+}
+
+func readDeltaCopySizeCopy(sizeFlags byte, br *bytes.Buffer) (size uint64) {
 	for i := range git.CopySizeFlagsLen {
 		if (0b00000001 & (sizeFlags >> i)) == 1 {
 			b, _ := br.ReadByte()
@@ -1405,7 +1766,7 @@ func (b *TreeBuilder) generateTreePayload(cwd []fs.DirEntry, currentPath string)
 
 			f, finfo := files.OpenFile(fp.Join(currentPath, e.Name()))
 
-            hsum := b.writeAndGetHash("blob", int(finfo.Size()), f)
+			hsum := b.writeAndGetHash("blob", int(finfo.Size()), f)
 
 			fmode := finfo.Mode().Perm()
 			var mode string
