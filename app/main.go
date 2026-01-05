@@ -318,6 +318,7 @@ func main() {
 	case "clone":
 		// just get the references from a remote repo
 		repo := os.Args[2]
+        workingDir := os.Args[3]
 		str := fmt.Sprintf("%s/info/refs?service=git-upload-pack", repo)
 		resp, err := http.Get(str)
 		if err != nil {
@@ -417,7 +418,6 @@ func main() {
 			}
 		}
 		// create the .git directory and packfile
-		workingDir, _ := strings.CutSuffix(fp.Base(repo), ".git")
 		tmp.Seek(-20, 2)
 		br.Reset(tmp)
 		fileHash := make([]byte, 20)
