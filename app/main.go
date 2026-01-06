@@ -238,7 +238,7 @@ func main() {
 
 		h := sha1.New()
 
-		if err := verifyPackTrailer(pf, fileInfo, h); err != nil {
+		if _, err := verifyPackTrailer(pf, fileInfo, h); err != nil {
 			fmt.Fprintf(os.Stderr, "Invalid Pack: %v", err)
 			os.Exit(1)
 		}
@@ -274,7 +274,7 @@ func main() {
 			NonDeltaCount: 0,
 		}
 
-		builder.ForEachObject(stats.ProcessResult)
+		builder.ForEachObjectResult(stats.ProcessResult)
 
 		stats.PrintSummary()
 
@@ -315,117 +315,25 @@ func main() {
 
 	case "clone":
 		// just get the references from a remote repo
-		repo := os.Args[2]
+		url := os.Args[2]
 		workingDir := os.Args[3]
-		str := fmt.Sprintf("%s/info/refs?service=git-upload-pack", repo)
-		resp, err := http.Get(str)
+
+		br := bufio.NewReader(nil)
+
+		refs, commonCaps := DiscoverRefs(url, br)
+		res := NegotiateAndReturnResponse(url, refs, commonCaps)
+		tmp, err := DemuxNegotiationResponse(br, res)
 		if err != nil {
-			panic(err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotModified {
+			fmt.Printf("Error while demuxing response: %v\n", err)
 			os.Exit(1)
 		}
 
-		br := bufio.NewReader(resp.Body)
-		firstFive, _ := br.Peek(5)
-		if matched, _ := regexp.Match("^[0-9a-f]", firstFive); !matched {
-			os.Exit(1)
-		}
-
-		// Read till the first flush packet
-		svcName, _ := readPktLine(br)
-		if !bytes.Equal(svcName, []byte("# service=git-upload-pack")) {
-			os.Exit(1)
-		}
-		readPktLine(br)
-
-		var negotiated []byte
-		refs := make(map[string][]byte)
-		peeledRefs := make(map[string][]byte)
-		for {
-			line, err := readPktLine(br)
-			if err != nil || line == nil {
-				break
-			}
-			line, caps, found := bytes.Cut(line, []byte{'\x00'})
-			if found {
-				var buf bytes.Buffer
-				for sCap := range strings.SplitSeq(string(caps), " ") {
-					if _, ok := git.C_CAPS[sCap]; ok {
-						buf.WriteString(sCap)
-						buf.WriteByte(' ')
-					}
-				}
-				negotiated = bytes.TrimSpace(buf.Bytes())
-			}
-			// TODO: maybe deduplicate this in the future
-			if bytes.Contains(line, []byte("^{}")) {
-				peeledRefs[string(line[41:])] = line[:40]
-				continue
-			}
-			refs[string(line[41:])] = line[:40]
-		}
-		// Now we have to create the want/have request. In our case, just wants.
-		var reqBody bytes.Buffer
-		prepareReq(&reqBody, refs, negotiated)
-		str2 := fmt.Sprintf("%s/git-upload-pack", repo)
-		res, err := http.Post(str2, "application/x-git-upload-pack-request", &reqBody)
-		if res.StatusCode != http.StatusOK {
-			fmt.Printf("Some yeeyeeass error bro: %d", res.StatusCode)
-		}
-
-		// Reset the reader
-		br.Reset(res.Body)
-		tmp, _ := os.CreateTemp(".", "tmp_pack_")
-		defer os.Remove(tmp.Name())
-		// Demux the response
-		for {
-			// 1. Read the 4-byte hex length
-			hexLen := make([]byte, 4)
-			_, err := io.ReadFull(br, hexLen)
-			if err == io.EOF {
-				break
-			}
-
-			var length int
-			fmt.Sscanf(string(hexLen), "%04x", &length)
-
-			if length == 0 { // Flush packet
-				continue
-			}
-
-			if peek, _ := br.Peek(4); bytes.HasPrefix(peek, []byte("NAK")) {
-				br.Discard(length - 4)
-				continue
-			}
-			// 3. Check the first byte (The Channel)
-			channel, _ := br.ReadByte()
-
-			switch channel {
-			case 1:
-				// stream the response body into packfile parsing
-				io.CopyN(tmp, br, int64(length-5))
-			case 2:
-				// This is progress text. Print to stderr.
-				io.CopyN(os.Stderr, br, int64(length-5))
-			case 3:
-				// This is a remote error.
-				io.CopyN(os.Stderr, br, int64(length-5))
-			}
-		}
 		// create the .git directory and packfile
-		tmp.Seek(-20, 2)
-		br.Reset(tmp)
-		fileHash := make([]byte, 20)
-		io.ReadFull(br, fileHash)
 		fileInfo, _ := os.Stat(tmp.Name())
 
-		if err := verifyPackTrailer(tmp, fileInfo, sha1.New()); err != nil {
-			fmt.Printf("%s: ok\n", tmp.Name())
-		} else {
-			fmt.Printf("%s: error\n", tmp.Name())
+		checksum, err := verifyPackTrailer(tmp, fileInfo, sha1.New())
+		if err != nil {
+			fmt.Printf("Invalid packfile received: %v", err)
 		}
 
 		err = os.MkdirAll(fp.Join(workingDir, git.GitObjDir, "pack"), 0775)
@@ -434,149 +342,334 @@ func main() {
 			os.Exit(1)
 		}
 
-		packFile := fp.Join(workingDir, git.GitObjDir, "pack", fmt.Sprintf("pack-%x.pack", fileHash))
-		if err := os.Rename(tmp.Name(), packFile); err != nil {
+		// Git actually calculates a different hash for the packfile name. But that isn't
+		// super important for this demonstration.
+		packFile := fp.Join(git.GitObjDir, "pack", fmt.Sprintf("pack-%x.pack", checksum))
+		if err := os.Rename(tmp.Name(), fp.Join(workingDir, packFile)); err != nil {
 			fmt.Printf("Error renaming file: %v\n", err)
 		}
 
 		os.Chdir(workingDir)
+
 		// Write the objects into the git object store
-		pf, fileInfo := files.OpenFile(fp.Join(git.GitObjDir, "pack", fmt.Sprintf("pack-%x.pack", fileHash)))
+		pf, fileInfo := files.OpenFile(packFile)
 
 		br.Reset(pf)
-		_, nObj, err := readPackHeader(br)
+		_, objCount, err := readPackHeader(br)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Pack header invalid: %v", err)
 			os.Exit(1)
 		}
 
+		streamer := &PackStreamer{
+			f:   pf,
+			br:  br,
+			zr:  nil,
+			zbr: nil,
+		}
+		packOrder, packIndex := streamer.BuildPackIndex(objCount)
+
 		var zr io.ReadCloser
 
-		builder := &copyBuilder{
-			packIndex:   make(map[uint64]PackNode),
+		builder := &objectBuilder{
+			packIndex:   packIndex,
 			lookupCache: make(map[uint64]*ResolvedObject),
-			packOrder:   make([]uint64, 0),
+			packOrder:   packOrder,
 			hashMap:     make(map[string]*ResolvedObject),
-			packLength:  nObj,
+			packLength:  objCount,
 			br:          br,
 			file:        pf,
 			fileInfo:    fileInfo,
 			zr:          zr,
 			hasher:      sha1.New(),
-			workingDir:  workingDir,
 		}
 
-		builder.BuildIndex()
+		storer := NewObjectStorer()
 
-		for _, offset := range builder.packOrder {
-			node := builder.packIndex[offset]
-
-			resolved := builder.buildObject(node)
-			builder.hashMap[resolved.SHA1] = resolved
-			objDirName, objFileName := hashes.DecomposeHash(resolved.SHA1)
-
-			err = os.MkdirAll(fp.Join(git.GitObjDir, objDirName), 0775)
-			if err != nil && !errors.Is(err, fs.ErrExist) {
-				fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
-				os.Exit(1)
-			}
-
-			tmpf, err := os.CreateTemp(git.GitObjDir, "tmp_obj_")
-			if err != nil {
-				fmt.Println("Error creating temp file")
-			}
-			defer os.Remove(tmpf.Name())
-			zw := builder.getZlibWriter(tmpf)
-			zw.Write(TypeToBytes(resolved.Type))
-			zw.Write([]byte{' '})
-			zw.Write(fmt.Appendf(nil, "%d", len(resolved.Data)))
-			zw.Write([]byte{'\x00'})
-			zw.Write(resolved.Data)
-			zw.Close()
-
-			objFilePath := fp.Join(git.GitObjDir, objDirName, objFileName)
-			if err = os.Rename(tmpf.Name(), objFilePath); err != nil {
-				fmt.Fprintf(os.Stderr, "Error creating object: %v\n", err)
-				os.Exit(1)
-			}
-		}
+		builder.ForEachObject(storer.Store)
 		// Get rid of the cache at this point, we don't need it anymore
-		builder.lookupCache = nil
+		builder.ClearCache()
 		runtime.GC()
 
-		remoteHeadSHA := refs["HEAD"]
-		var localDefaultBranch string
 		// create the .git/refs directory
-		for ref, SHA := range refs {
-			if ref != "HEAD" && slices.Equal(SHA, remoteHeadSHA) {
-				localDefaultBranch = ref
-			}
+		CreateRefs(refs)
+		CreateHeads(refs)
 
-			localRef := strings.Replace(ref, "refs/heads/", "refs/remotes/origin/", 1)
+		builder.hashMap = storer.hashMap
 
-			destPath := fp.Join(".git", localRef)
-			parentDir := fp.Dir(destPath)
-
-			if err := os.MkdirAll(parentDir, 0755); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				continue
-			}
-
-			// 4. Write the SHA as the file content
-			// 'object' is the SHA-1 hash (40 bytes)
-			if err := os.WriteFile(destPath, append(SHA, '\n'), 0644); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			}
-		}
-
-		if localDefaultBranch != "" {
-			// Set the remote HEAD ref
-			localRef := strings.Replace(localDefaultBranch, "refs/heads/", "refs/remotes/origin/", 1)
-			originHeadPath := fp.Join(".git", "refs/remotes/origin/HEAD")
-			symbolicContent := fmt.Sprintf("ref: %s\n", localRef)
-			os.WriteFile(originHeadPath, []byte(symbolicContent), 0644)
-
-			// Create the LOCAL branch ref (e.g., .git/refs/heads/main)
-			localBranchPath := fp.Join(".git", localDefaultBranch)
-			os.MkdirAll(fp.Dir(localBranchPath), 0755)
-			os.WriteFile(localBranchPath, append(remoteHeadSHA, '\n'), 0644)
-			rootHeadPath := fp.Join(".git", "HEAD")
-			rootHeadContent := fmt.Sprintf("ref: %s\n", localDefaultBranch)
-			os.WriteFile(rootHeadPath, []byte(rootHeadContent), 0644)
+		repoBuilder := &RepoBuilder{
+			objectSource: storer.hashMap,
 		}
 
 		// Checkout into the current HEAD
 		headSHA := refs["HEAD"]
 		// Read it from the hashMap
-		checkoutResult := builder.checkoutRepository(headSHA)
-		indexEntries := checkoutResult.indexEntries
-
-		slices.SortFunc(indexEntries, func(a, b *IndexEntry) int {
-			return strings.Compare(a.Path, b.Path)
-		})
-
-		tmpf, _ := os.CreateTemp(git.GitDir, "tmp_index_")
-		defer os.Remove(tmpf.Name())
-		sha := sha1.New()
-		mw := io.MultiWriter(tmpf, sha)
-		mw.Write([]byte{'D', 'I', 'R', 'C'})
-		binary.Write(mw, binary.BigEndian, uint32(2))
-		binary.Write(mw, binary.BigEndian, uint32(len(indexEntries)))
-		for _, entry := range indexEntries {
-			writeGitIndexLine(entry, mw)
-		}
-		h := sha.Sum(nil)
-		tmpf.Write(h)
-
-		if err = os.Rename(tmpf.Name(), git.GitIndexPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Error creating object: %v\n", err)
-			os.Exit(1)
-		}
+		checkoutResult := repoBuilder.checkoutRepository(headSHA)
+		repoBuilder.WriteIndex(checkoutResult.indexEntries)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
 	}
+}
+
+type RepoBuilder struct {
+	// We point directly to the map owned by the Storer
+	// This avoids copying the actual data
+	objectSource map[string]*ResolvedObject
+
+	// The root directory of the repo (where the files go)
+	workingDir string
+
+	// Collected metadata for the .git/index file
+	indexEntries []*IndexEntry
+}
+
+func (r *RepoBuilder) WriteIndex(indexEntries []*IndexEntry) {
+	slices.SortFunc(indexEntries, func(a, b *IndexEntry) int {
+		return strings.Compare(a.Path, b.Path)
+	})
+
+	tmpf, _ := os.CreateTemp(git.GitDir, "tmp_index_")
+	defer os.Remove(tmpf.Name())
+	sha := sha1.New()
+	mw := io.MultiWriter(tmpf, sha)
+	mw.Write([]byte{'D', 'I', 'R', 'C'})
+	binary.Write(mw, binary.BigEndian, uint32(2))
+	binary.Write(mw, binary.BigEndian, uint32(len(indexEntries)))
+	for _, entry := range indexEntries {
+		writeGitIndexLine(entry, mw)
+	}
+	h := sha.Sum(nil)
+	tmpf.Write(h)
+
+	if err := os.Rename(tmpf.Name(), git.GitIndexPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating object: %v\n", err)
+		os.Exit(1)
+	}
+}
+func CreateHeads(refs map[string][]byte) {
+	remoteHeadSHA, ok := refs["HEAD"]
+	if !ok {
+		return
+	}
+
+	var localHeadName string
+	for ref, SHA := range refs {
+		if ref != "HEAD" && slices.Equal(SHA, remoteHeadSHA) {
+			localHeadName = ref
+			break
+		}
+	}
+
+	if localHeadName == "" {
+		return
+	}
+
+	// Set the remote HEAD ref
+	localRef := strings.Replace(localHeadName, "refs/heads/", "refs/remotes/origin/", 1)
+	originHeadPath := fp.Join(".git", "refs/remotes/origin/HEAD")
+	symbolicContent := fmt.Sprintf("ref: %s\n", localRef)
+	os.WriteFile(originHeadPath, []byte(symbolicContent), 0644)
+
+	// Create the LOCAL branch ref (e.g., .git/refs/heads/main)
+	localBranchPath := fp.Join(".git", localHeadName)
+	os.MkdirAll(fp.Dir(localBranchPath), 0755)
+	os.WriteFile(localBranchPath, append(remoteHeadSHA, '\n'), 0644)
+	rootHeadPath := fp.Join(".git", "HEAD")
+	rootHeadContent := fmt.Sprintf("ref: %s\n", localHeadName)
+	os.WriteFile(rootHeadPath, []byte(rootHeadContent), 0644)
+}
+
+func GuessDefaultBranch(refs map[string][]byte) string {
+	remoteHeadSHA, ok := refs["HEAD"]
+	if !ok {
+		return ""
+	}
+	for ref, SHA := range refs {
+		if ref != "HEAD" && slices.Equal(SHA, remoteHeadSHA) {
+			return ref
+		}
+	}
+	return ""
+}
+
+func CreateRefs(refs map[string][]byte) {
+	for ref, SHA := range refs {
+		localRef := strings.Replace(ref, "refs/heads/", "refs/remotes/origin/", 1)
+
+		destPath := fp.Join(".git", localRef)
+		parentDir := fp.Dir(destPath)
+
+		if err := os.MkdirAll(parentDir, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			continue
+		}
+
+		// 4. Write the SHA as the file content
+		// 'object' is the SHA-1 hash (40 bytes)
+		if err := os.WriteFile(destPath, append(SHA, '\n'), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
+	}
+}
+
+type ObjectStorer struct {
+	objDir  string
+	zw      *zlib.Writer
+	hashMap map[string]*ResolvedObject
+}
+
+func NewObjectStorer() *ObjectStorer {
+	return &ObjectStorer{
+		objDir:  git.GitObjDir,
+		zw:      zlib.NewWriter(nil),
+		hashMap: make(map[string]*ResolvedObject),
+	}
+}
+
+// Store is our Callback implementation
+func (s *ObjectStorer) Store(obj *ResolvedObject) error {
+	dirName, fileName := hashes.DecomposeHash(obj.SHA1)
+	fullDir := fp.Join(s.objDir, dirName)
+
+	s.hashMap[obj.SHA1] = obj
+
+	if err := os.MkdirAll(fullDir, 0775); err != nil {
+		return err
+	}
+
+	// Create a temp file in the same directory to ensure a fast Rename
+	tmp, err := os.CreateTemp(s.objDir, "tmp_obj_")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+
+	// Use our internal helper to write the compressed data
+	if err := s.writeCompressed(tmp, obj); err != nil {
+		tmp.Close()
+		return err
+	}
+	tmp.Close()
+
+	return os.Rename(tmp.Name(), fp.Join(fullDir, fileName))
+}
+
+func (s *ObjectStorer) writeCompressed(w io.Writer, obj *ResolvedObject) error {
+	s.zw.Reset(w)
+	s.zw.Write(TypeToBytes(obj.Type))
+	s.zw.Write([]byte{' '})
+	s.zw.Write(fmt.Appendf(nil, "%d", len(obj.Data)))
+	s.zw.Write([]byte{'\x00'})
+	s.zw.Write(obj.Data)
+	s.zw.Close()
+	return s.zw.Close()
+}
+
+func DemuxNegotiationResponse(br *bufio.Reader, res io.Reader) (*os.File, error) {
+	br.Reset(res)
+	tmp, err := os.CreateTemp(".", "tmp_pack_")
+	if err != nil {
+		return nil, fmt.Errorf("Error creating temp pack file: %w", err)
+	}
+	// Demux the response
+	for {
+		// 1. Read the 4-byte hex length
+		hexLen := make([]byte, 4)
+		_, err := io.ReadFull(br, hexLen)
+		if err == io.EOF {
+			break
+		}
+
+		var length int
+		fmt.Sscanf(string(hexLen), "%04x", &length)
+
+		if length == 0 { // Flush packet
+			continue
+		}
+
+		if peek, _ := br.Peek(4); bytes.HasPrefix(peek, []byte("NAK")) {
+			br.Discard(length - 4)
+			continue
+		}
+		// 3. Check the first byte (The Channel)
+		channel, _ := br.ReadByte()
+
+		switch channel {
+		case 1:
+			// stream the response body into packfile parsing
+			io.CopyN(tmp, br, int64(length-5))
+		case 2:
+			// This is progress text. Print to stderr.
+			io.CopyN(os.Stderr, br, int64(length-5))
+		case 3:
+			// This is a remote error.
+			io.CopyN(os.Stderr, br, int64(length-5))
+		}
+	}
+	return tmp, nil
+}
+
+func NegotiateAndReturnResponse(url string, refs map[string][]byte, commonCaps []byte) io.Reader {
+	reqBody := prepNegotiationRequest(refs, commonCaps)
+	negotiationEndpoint := fmt.Sprintf("%s/git-upload-pack", url)
+	res, _ := http.Post(negotiationEndpoint, git.GitNegotationReqCType, reqBody)
+	if res.StatusCode != http.StatusOK {
+		fmt.Printf("Some yeeyeeass error bro: %d", res.StatusCode)
+	}
+	return res.Body
+}
+
+func DiscoverRefs(url string, br *bufio.Reader) (map[string][]byte, []byte) {
+	str := fmt.Sprintf("%s/info/refs?service=git-upload-pack", url)
+	resp, err := http.Get(str)
+	if err != nil {
+		panic(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotModified {
+		os.Exit(1)
+	}
+
+	br.Reset(resp.Body)
+	firstFive, _ := br.Peek(5)
+	if matched, _ := regexp.Match("^[0-9a-f]", firstFive); !matched {
+		os.Exit(1)
+	}
+
+	// Read till the first flush packet
+	svcName, _ := readPktLine(br)
+	if !bytes.Equal(svcName, []byte("# service=git-upload-pack")) {
+		os.Exit(1)
+	}
+	readPktLine(br)
+
+	var commonCaps []byte
+	refs := make(map[string][]byte)
+	for {
+		line, err := readPktLine(br)
+		if err != nil || line == nil {
+			break
+		}
+		line, caps, found := bytes.Cut(line, []byte{'\x00'})
+		if found {
+			var buf bytes.Buffer
+			for sCap := range strings.SplitSeq(string(caps), " ") {
+				if _, ok := git.C_CAPS[sCap]; ok {
+					buf.WriteString(sCap)
+					buf.WriteByte(' ')
+				}
+			}
+			commonCaps = bytes.TrimSpace(buf.Bytes())
+		}
+		if bytes.Contains(line, []byte("^{}")) {
+			continue
+		}
+		refs[string(line[41:])] = line[:40]
+	}
+	return refs, commonCaps
 }
 
 type PackStreamer struct {
@@ -774,10 +867,12 @@ func isLastTreeEntry(treeData []byte, delimIdx int) bool {
 	return len(treeData[delimIdx+1:]) <= 20
 }
 
-func prepareReq(buf *bytes.Buffer, refs map[string][]byte, negotiated []byte) {
-	for ref, pkt := range refs {
+func prepNegotiationRequest(refs map[string][]byte, negotiated []byte) io.Reader {
+	var i int
+	var buf bytes.Buffer
+	for _, pkt := range refs {
 		var pktPayload string
-		if ref == "HEAD" {
+		if i == 0 {
 			pktPayload = fmt.Sprintf("want %s %s\n", pkt, negotiated)
 		} else {
 			pktPayload = fmt.Sprintf("want %s\n", pkt)
@@ -785,9 +880,11 @@ func prepareReq(buf *bytes.Buffer, refs map[string][]byte, negotiated []byte) {
 		pktHeader := fmt.Sprintf("%04x", len(pktPayload)+4)
 		buf.WriteString(pktHeader)
 		buf.WriteString(pktPayload)
+		i++
 	}
 	buf.WriteString("0000")
 	buf.WriteString("0009done\n")
+	return &buf
 }
 
 func validateUploadPackResponse(br *bufio.Reader) error {
@@ -877,35 +974,35 @@ func readPackHeader(r io.Reader) (version, objectCount uint32, err error) {
 	return version, objectCount, nil
 }
 
-func verifyPackTrailer(f *os.File, fInfo os.FileInfo, h hash.Hash) error {
+func verifyPackTrailer(f *os.File, fInfo os.FileInfo, h hash.Hash) ([]byte, error) {
 	defer h.Reset()
 	defer f.Seek(0, io.SeekStart)
 
 	if fInfo.Size() < 32 {
-		return fmt.Errorf("packfile is too small to be valid")
+		return nil, fmt.Errorf("packfile is too small to be valid")
 	}
 
 	expected := make([]byte, 20)
 	_, err := f.ReadAt(expected, fInfo.Size()-20)
 	if err != nil {
-		return fmt.Errorf("failed to read expected trailer: %w", err)
+		return nil, fmt.Errorf("failed to read expected trailer: %w", err)
 	}
 
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return err
+		return nil, fmt.Errorf("failed to seek file: %w", err)
 	}
 
 	lr := io.LimitReader(f, fInfo.Size()-20)
 
 	if _, err := io.Copy(h, lr); err != nil {
-		return fmt.Errorf("failed to hash pack content: %w", err)
+		return nil, fmt.Errorf("failed to hash pack content: %w", err)
 	}
 
 	actual := h.Sum(nil)
 	if !bytes.Equal(expected, actual) {
-		return fmt.Errorf("invalid packfile: checksum doesn't match")
+		return nil, fmt.Errorf("invalid packfile: checksum doesn't match")
 	}
-	return nil
+	return actual, nil
 }
 
 func printResult(res *ObjectResult) {
@@ -1193,7 +1290,19 @@ type objectBuilder struct {
 }
 
 // TODO: add verification. This can only be run when some info about the pack is already known.
-func (builder *objectBuilder) ForEachObject(fn func(res *ObjectResult)) {
+func (builder *objectBuilder) ForEachObject(fn func(res *ResolvedObject) error) {
+	for _, offset := range builder.packOrder {
+		node := builder.packIndex[offset]
+		result := builder.buildObject(node)
+		fn(result)
+	}
+}
+
+func (builder *objectBuilder) ClearCache() {
+	builder.lookupCache = nil
+}
+
+func (builder *objectBuilder) ForEachObjectResult(fn func(res *ObjectResult)) {
 	for i, offset := range builder.packOrder {
 		node := builder.packIndex[offset]
 
@@ -1310,26 +1419,22 @@ func (builder *objectBuilder) readObjectData(n *ObjectNode) []byte {
 	return buf
 }
 
-func (builder *objectBuilder) checkoutRepository(headSHA []byte) *checkoutResult {
+func (builder *RepoBuilder) checkoutRepository(headSHA []byte) *checkoutResult {
 	result := &checkoutResult{indexEntries: make([]*IndexEntry, 0, 32)}
-	headCommit := builder.hashMap[string(headSHA)]
+	headCommit := builder.objectSource[string(headSHA)]
 	treeSHA := returnCommitTreeSHA(headCommit.Data)
-	treeData := builder.hashMap[treeSHA].Data
+	treeData := builder.objectSource[treeSHA].Data
 	builder.buildRepository("", treeData, result)
 	return result
 }
 
-// When I see a tree:
-// 1. I need to create a directory for it.
-// 2. I need to parse the contents of the tree into it's own directory
-// 3. Repeat
-func (builder *objectBuilder) buildRepository(workingDir string, treeData []byte, result *checkoutResult) {
+func (builder *RepoBuilder) buildRepository(workingDir string, treeData []byte, result *checkoutResult) {
 	treeEntries := parseTree(treeData)
 	for _, treeEntry := range treeEntries {
 		if treeEntry.mode != git.GitDirMode {
 			// write the files
 			filepath := fp.Join(workingDir, treeEntry.name)
-			os.WriteFile(filepath, builder.hashMap[treeEntry.sha1].Data, TranslateGitMode(treeEntry.mode))
+			os.WriteFile(filepath, builder.objectSource[treeEntry.sha1].Data, TranslateGitMode(treeEntry.mode))
 			fileInfo, _ := os.Lstat(filepath)
 			shaBytes, _ := hex.DecodeString(treeEntry.sha1)
 			stat := fileInfo.Sys().(*syscall.Stat_t)
@@ -1352,7 +1457,7 @@ func (builder *objectBuilder) buildRepository(workingDir string, treeData []byte
 		} else {
 			curDir := fp.Join(workingDir, treeEntry.name)
 			os.MkdirAll(curDir, 0755)
-			treeData := builder.hashMap[treeEntry.sha1].Data
+			treeData := builder.objectSource[treeEntry.sha1].Data
 			builder.buildRepository(fp.Join(workingDir, treeEntry.name), treeData, result)
 		}
 	}
@@ -1429,7 +1534,7 @@ type ObjectNode struct {
 	objSize    uint64
 	headerOfs  uint64
 	dataOffset uint64 // The offset from the headerOfs to find the data, can be a maximum of 64 bits -> 8 bytes -> can be stored in uint8
-    objType    uint8
+	objType    uint8
 }
 
 func (n *ObjectNode) Type() uint8 {
@@ -1454,7 +1559,7 @@ type DeltaNode struct {
 	parentOfs  uint64
 	objSize    uint64
 	headerOfs  uint64
-    ops        []DeltaOps
+	ops        []DeltaOps
 }
 
 func (n *DeltaNode) Type() uint8 {
@@ -1488,7 +1593,7 @@ func (CopyOp) kind() byte {
 
 type InsertOp struct {
 	Payload     []byte
-    PayloadSize uint8
+	PayloadSize uint8
 }
 
 func (InsertOp) kind() byte {
