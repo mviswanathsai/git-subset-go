@@ -351,7 +351,6 @@ func main() {
 
 		os.Chdir(workingDir)
 
-		// Write the objects into the git object store
 		pf, fileInfo := files.OpenFile(packFile)
 
 		br.Reset(pf)
@@ -404,8 +403,15 @@ func main() {
 		// Checkout into the current HEAD
 		headSHA := refs["HEAD"]
 		// Read it from the hashMap
-		checkoutResult := repoBuilder.checkoutRepository(headSHA)
-		repoBuilder.WriteIndex(checkoutResult.indexEntries)
+		checkoutResult, err := repoBuilder.checkoutCommit(headSHA)
+		if err != nil {
+			fmt.Printf("Error checking out HEAD commit %s: %v\n", headSHA, err)
+		}
+
+		if err := repoBuilder.WriteIndex(checkoutResult.indexEntries); err != nil {
+			fmt.Printf("Error writing index: %v\n", err)
+			os.Exit(1)
+		}
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
@@ -425,29 +431,40 @@ type RepoBuilder struct {
 	indexEntries []*IndexEntry
 }
 
-func (r *RepoBuilder) WriteIndex(indexEntries []*IndexEntry) {
+func (r *RepoBuilder) WriteIndex(indexEntries []*IndexEntry) error {
 	slices.SortFunc(indexEntries, func(a, b *IndexEntry) int {
 		return strings.Compare(a.Path, b.Path)
 	})
 
-	tmpf, _ := os.CreateTemp(git.GitDir, "tmp_index_")
+	tmpf, err := os.CreateTemp(git.GitDir, "tmp_index_")
+	if err != nil {
+		return err
+	}
 	defer os.Remove(tmpf.Name())
+
 	sha := sha1.New()
 	mw := io.MultiWriter(tmpf, sha)
-	mw.Write([]byte{'D', 'I', 'R', 'C'})
-	binary.Write(mw, binary.BigEndian, uint32(2))
-	binary.Write(mw, binary.BigEndian, uint32(len(indexEntries)))
+	if _, err := mw.Write([]byte{'D', 'I', 'R', 'C'}); err != nil {
+		return err
+	}
+	if err := binary.Write(mw, binary.BigEndian, uint32(2)); err != nil {
+		return err
+	}
+	if err := binary.Write(mw, binary.BigEndian, uint32(len(indexEntries))); err != nil {
+		return err
+	}
 	for _, entry := range indexEntries {
-		writeGitIndexLine(entry, mw)
+		if err := writeGitIndexLine(entry, mw); err != nil {
+			return err
+		}
 	}
 	h := sha.Sum(nil)
-	tmpf.Write(h)
-
-	if err := os.Rename(tmpf.Name(), git.GitIndexPath); err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating object: %v\n", err)
-		os.Exit(1)
+	if _, err := tmpf.Write(h); err != nil {
+		return err
 	}
+	return os.Rename(tmpf.Name(), git.GitIndexPath)
 }
+
 func CreateHeads(refs map[string][]byte) {
 	remoteHeadSHA, ok := refs["HEAD"]
 	if !ok {
@@ -771,22 +788,27 @@ type IndexEntry struct {
 	Path      string   // The relative path (e.g., "dir/file.txt")
 }
 
-func writeGitIndexLine(e *IndexEntry, w io.Writer) {
-	binary.Write(w, binary.BigEndian, e.CtimeSec)
-	binary.Write(w, binary.BigEndian, e.CtimeNano)
-	binary.Write(w, binary.BigEndian, e.MtimeSec)
-	binary.Write(w, binary.BigEndian, e.MtimeNano)
-	binary.Write(w, binary.BigEndian, e.Dev)
-	binary.Write(w, binary.BigEndian, e.Ino)
-	binary.Write(w, binary.BigEndian, e.Mode)
-	binary.Write(w, binary.BigEndian, e.UID)
-	binary.Write(w, binary.BigEndian, e.GID)
-	binary.Write(w, binary.BigEndian, e.Size)
-	w.Write(e.SHA[:])
-	binary.Write(w, binary.BigEndian, e.Flags)
+func writeGitIndexLine(e *IndexEntry, w io.Writer) error {
+	var buf [62]byte
+	binary.BigEndian.PutUint32(buf[0:4], e.CtimeSec)
+	binary.BigEndian.PutUint32(buf[4:8], e.CtimeNano)
+	binary.BigEndian.PutUint32(buf[8:12], e.MtimeSec)
+	binary.BigEndian.PutUint32(buf[12:16], e.MtimeNano)
+	binary.BigEndian.PutUint32(buf[16:20], e.Dev)
+	binary.BigEndian.PutUint32(buf[20:24], e.Ino)
+	binary.BigEndian.PutUint32(buf[24:28], e.Mode)
+	binary.BigEndian.PutUint32(buf[28:32], e.UID)
+	binary.BigEndian.PutUint32(buf[32:36], e.GID)
+	binary.BigEndian.PutUint32(buf[36:40], e.Size)
+	copy(buf[40:60], e.SHA[:])
+	binary.BigEndian.PutUint16(buf[60:62], e.Flags)
 
-	// Write the path
-	w.Write([]byte(e.Path))
+	if _, err := w.Write(buf[:]); err != nil {
+		return err
+	}
+	if _, err := w.Write([]byte(e.Path)); err != nil {
+		return err
+	}
 
 	// Padding logic: Git requires 1-8 null bytes to reach
 	// a total entry length that is a multiple of 8.
@@ -795,7 +817,10 @@ func writeGitIndexLine(e *IndexEntry, w io.Writer) {
 	if padding == 0 {
 		padding = 8
 	}
-	w.Write(make([]byte, padding))
+	if _, err := w.Write(make([]byte, padding)); err != nil {
+		return err
+	}
+	return nil
 }
 
 func TranslateGitModeToUint(gitMode string) uint32 {
@@ -1419,24 +1444,37 @@ func (builder *objectBuilder) readObjectData(n *ObjectNode) []byte {
 	return buf
 }
 
-func (builder *RepoBuilder) checkoutRepository(headSHA []byte) *checkoutResult {
+func (builder *RepoBuilder) checkoutCommit(commitSHA []byte) (*checkoutResult, error) {
 	result := &checkoutResult{indexEntries: make([]*IndexEntry, 0, 32)}
-	headCommit := builder.objectSource[string(headSHA)]
+	headCommit := builder.objectSource[string(commitSHA)]
 	treeSHA := returnCommitTreeSHA(headCommit.Data)
 	treeData := builder.objectSource[treeSHA].Data
-	builder.buildRepository("", treeData, result)
-	return result
+	if err := builder.buildRepository("", treeData, result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
-func (builder *RepoBuilder) buildRepository(workingDir string, treeData []byte, result *checkoutResult) {
+func (builder *RepoBuilder) buildRepository(currentDir string, treeData []byte, result *checkoutResult) error {
 	treeEntries := parseTree(treeData)
 	for _, treeEntry := range treeEntries {
 		if treeEntry.mode != git.GitDirMode {
 			// write the files
-			filepath := fp.Join(workingDir, treeEntry.name)
-			os.WriteFile(filepath, builder.objectSource[treeEntry.sha1].Data, TranslateGitMode(treeEntry.mode))
-			fileInfo, _ := os.Lstat(filepath)
-			shaBytes, _ := hex.DecodeString(treeEntry.sha1)
+			filepath := fp.Join(currentDir, treeEntry.name)
+			if err := os.WriteFile(filepath, builder.objectSource[treeEntry.sha1].Data, TranslateGitMode(treeEntry.mode)); err != nil {
+				return err
+			}
+
+			fileInfo, err := os.Lstat(filepath)
+			if err != nil {
+				return err
+			}
+
+			shaBytes, err := hex.DecodeString(treeEntry.sha1)
+			if err != nil {
+				return err
+			}
+
 			stat := fileInfo.Sys().(*syscall.Stat_t)
 			lengthFlag := min(len(filepath), 0x0FFF)
 			result.indexEntries = append(result.indexEntries, &IndexEntry{
@@ -1455,12 +1493,17 @@ func (builder *RepoBuilder) buildRepository(workingDir string, treeData []byte, 
 				Path:      filepath,
 			})
 		} else {
-			curDir := fp.Join(workingDir, treeEntry.name)
-			os.MkdirAll(curDir, 0755)
+			currentDir = fp.Join(currentDir, treeEntry.name)
+			if err := os.MkdirAll(currentDir, 0755); err != nil {
+				return err
+			}
 			treeData := builder.objectSource[treeEntry.sha1].Data
-			builder.buildRepository(fp.Join(workingDir, treeEntry.name), treeData, result)
+			if err := builder.buildRepository(currentDir, treeData, result); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 type ObjectResult struct {
