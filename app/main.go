@@ -16,7 +16,6 @@ import (
 	"os"
 	fp "path/filepath"
 	"regexp"
-	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -77,8 +76,14 @@ func main() {
 		defer zr.Close()
 
 		r := bufio.NewReader(zr)
-		r.ReadBytes(git.ObjHeaderDelim)
-		io.Copy(os.Stdout, r)
+		if _, err := r.ReadBytes(git.ObjHeaderDelim); err != nil {
+			fmt.Printf("Error reading object file: %v\n", err)
+			os.Exit(1)
+		}
+		if _, err := io.Copy(os.Stdout, r); err != nil {
+			fmt.Printf("Error writing to stdout: %v\n", err)
+			os.Exit(1)
+		}
 
 	case "hash-object":
 		var filename string
@@ -96,7 +101,12 @@ func main() {
 			}
 		}
 
-		f, finfo := files.OpenFile(filename)
+		f, finfo, err := files.OpenFile(filename)
+		if err != nil {
+			fmt.Printf("Error opening object file: %v", err)
+			os.Exit(1)
+		}
+
 		h := hashes.HashObject(f, finfo.Size(), "blob", write)
 
 		// Print the hex encoding of the hash.
@@ -141,7 +151,12 @@ func main() {
 		delimIdx := bytes.IndexByte(b, '\x00')
 		b = b[delimIdx+1:]
 
-		out := parseTreeObject(b, nameonly)
+		out, err := parseTreeObject(b, nameonly)
+		if err != nil {
+			fmt.Printf("Error parsing tree: %v", err)
+			os.Exit(1)
+		}
+
 		slices.Sort(out)
 		fmt.Printf("%v\n", strings.Join(out, "\n"))
 
@@ -154,18 +169,22 @@ func main() {
 		cwd, err := os.ReadDir(ex)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error getting current working dir: %v\n", err)
+			os.Exit(1)
 		}
 
 		hash := sha1.New()
 		zw := zlib.NewWriter(nil)
-		defer zw.Close()
 
 		treeBuilder := &TreeBuilder{
 			hash: hash,
 			zw:   zw,
 		}
 
-		payload := treeBuilder.generateTreePayload(cwd, ".")
+		payload, err := treeBuilder.generateTreePayload(cwd, ".")
+		if err != nil {
+			fmt.Printf("Error generating tree payload: %v", err)
+			os.Exit(1)
+		}
 
 		tmpf := files.CreateTempObjFile()
 		defer os.Remove(tmpf.Name())
@@ -174,7 +193,10 @@ func main() {
 		zw.Reset(tmpf)
 		mw := io.MultiWriter(hash, zw)
 
-		files.WriteGitObject(mw, "tree", payload.Len(), payload)
+		if err := files.WriteGitObject(mw, "tree", payload.Len(), payload); err != nil {
+			fmt.Printf("Error writing object to disk: %v", err)
+			os.Exit(1)
+		}
 		h := hex.EncodeToString(hash.Sum(nil))
 
 		objDirName, objFileName := hashes.DecomposeHash(h)
@@ -187,6 +209,11 @@ func main() {
 		objFilePath := fp.Join(git.GitObjDir, objDirName, objFileName)
 		if os.Rename(tmpf.Name(), objFilePath) != nil {
 			fmt.Fprintf(os.Stderr, "Error creating blob object: %v\n", err)
+			os.Exit(1)
+		}
+
+		if err := zw.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error closing zlib writer: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -213,8 +240,14 @@ func main() {
 		zw := zlib.NewWriter(tmpf)
 		mw := io.MultiWriter(hash, zw)
 
-		files.WriteGitObject(mw, "commit", buf.Len(), buf)
-		zw.Close()
+		if err := files.WriteGitObject(mw, "commit", buf.Len(), buf); err != nil {
+			fmt.Printf("Error writing object to disk: %v", err)
+			os.Exit(1)
+		}
+		if err := zw.Close(); err != nil {
+			fmt.Printf("Error writing object to disk: %v", err)
+			os.Exit(1)
+		}
 		tmpf.Close()
 
 		h := hex.EncodeToString(hash.Sum(nil))
@@ -223,6 +256,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
 			os.Exit(1)
 		}
+
 		objFilePath := fp.Join(git.GitObjDir, objDirName, objFileName)
 		if err := os.Rename(tmpf.Name(), objFilePath); err != nil {
 			fmt.Fprintf(os.Stderr, "Error creating commit object: %v\n", err)
@@ -234,7 +268,11 @@ func main() {
 	case "verify-pack":
 		pfPath := os.Args[2]
 		// Open the file instead for comparison
-		pf, fileInfo := files.OpenFile(pfPath)
+		pf, fileInfo, err := files.OpenFile(pfPath)
+		if err != nil {
+			fmt.Printf("Error opening pack file: %v", err)
+			os.Exit(1)
+		}
 
 		h := sha1.New()
 
@@ -256,7 +294,11 @@ func main() {
 			zr:  nil,
 			zbr: nil,
 		}
-		packOrder, packIndex := streamer.BuildPackIndex(objCount)
+		packOrder, packIndex, err := streamer.BuildPackIndex(objCount)
+		if err != nil {
+			fmt.Printf("Error building pack index: %v", err)
+			os.Exit(1)
+		}
 
 		builder := &objectBuilder{
 			packIndex:   packIndex,
@@ -265,7 +307,6 @@ func main() {
 			br:          br,
 			file:        pf,
 			fileInfo:    fileInfo,
-			zr:          nil,
 			hasher:      h,
 		}
 
@@ -274,7 +315,10 @@ func main() {
 			NonDeltaCount: 0,
 		}
 
-		builder.ForEachObjectResult(stats.ProcessResult)
+		if err := builder.ForEachObjectResult(stats.ProcessResult); err != nil {
+			fmt.Printf("Error processing packfile stats: %v", err)
+			os.Exit(1)
+		}
 
 		stats.PrintSummary()
 
@@ -286,7 +330,8 @@ func main() {
 		str := fmt.Sprintf("%s/info/refs?service=git-upload-pack", repo)
 		resp, err := http.Get(str)
 		if err != nil {
-			panic(err)
+			fmt.Printf("Error fetching refs: %v", err)
+			os.Exit(1)
 		}
 		defer resp.Body.Close()
 
@@ -299,10 +344,16 @@ func main() {
 			os.Exit(1)
 		}
 
-		readPktLine(br)
+		if _, err := readPktLine(br); err != nil {
+			fmt.Printf("Error reading packet line: %v", err)
+			os.Exit(1)
+		}
 		for {
 			line, err := readPktLine(br)
-			if err != nil || line == nil {
+			if err != nil {
+				fmt.Printf("Error reading packet line: %v", err)
+				os.Exit(1)
+			} else if line == nil {
 				break
 			}
 			// If a pktline contains a nul byte, it must be the first ref. Everything after the
@@ -320,8 +371,18 @@ func main() {
 
 		br := bufio.NewReader(nil)
 
-		refs, commonCaps := DiscoverRefs(url, br)
-		res := NegotiateAndReturnResponse(url, refs, commonCaps)
+		refs, commonCaps, err := DiscoverRefs(url, br)
+		if err != nil {
+			fmt.Printf("Error discovering refs: %v\n", err)
+			os.Exit(1)
+		}
+
+		res, err := NegotiateAndReturnResponse(url, refs, commonCaps)
+		if err != nil {
+			fmt.Printf("Error negotiating packfile: %v\n", err)
+			os.Exit(1)
+		}
+
 		tmp, err := DemuxNegotiationResponse(br, res)
 		if err != nil {
 			fmt.Printf("Error while demuxing response: %v\n", err)
@@ -329,16 +390,21 @@ func main() {
 		}
 
 		// create the .git directory and packfile
-		fileInfo, _ := os.Stat(tmp.Name())
+		fileInfo, err := os.Stat(tmp.Name())
+		if err != nil {
+			fmt.Printf("Error opening packfile: %v", err)
+			os.Exit(1)
+		}
 
 		checksum, err := verifyPackTrailer(tmp, fileInfo, sha1.New())
 		if err != nil {
 			fmt.Printf("Invalid packfile received: %v", err)
+			os.Exit(1)
 		}
 
 		err = os.MkdirAll(fp.Join(workingDir, git.GitObjDir, "pack"), 0775)
 		if err != nil && !errors.Is(err, fs.ErrExist) {
-			fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error creating pack dir: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -346,27 +412,37 @@ func main() {
 		// super important for this demonstration.
 		packFile := fp.Join(git.GitObjDir, "pack", fmt.Sprintf("pack-%x.pack", checksum))
 		if err := os.Rename(tmp.Name(), fp.Join(workingDir, packFile)); err != nil {
-			fmt.Printf("Error renaming file: %v\n", err)
+			fmt.Printf("Error writing packfile: %v\n", err)
 		}
 
-		os.Chdir(workingDir)
+		if err := os.Chdir(workingDir); err != nil {
+			fmt.Printf("failed to enter repository directory %q: %v\n", workingDir, err)
+			os.Exit(1)
+		}
 
-		pf, fileInfo := files.OpenFile(packFile)
+		pf, fileInfo, err := files.OpenFile(packFile)
+		if err != nil {
+			fmt.Printf("Error opening packfile: %v\n", err)
+			os.Exit(1)
+		}
 
 		br.Reset(pf)
 		_, objCount, err := readPackHeader(br)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Pack header invalid: %v", err)
+			fmt.Printf("Pack header invalid: %v\n", err)
 			os.Exit(1)
 		}
 
 		streamer := &PackStreamer{
-			f:   pf,
-			br:  br,
-			zr:  nil,
-			zbr: nil,
+			f:  pf,
+			br: br,
 		}
-		packOrder, packIndex := streamer.BuildPackIndex(objCount)
+
+		packOrder, packIndex, err := streamer.BuildPackIndex(objCount)
+		if err != nil {
+			fmt.Printf("Error building pack index: %v\n", err)
+			os.Exit(1)
+		}
 
 		var zr io.ReadCloser
 
@@ -385,14 +461,22 @@ func main() {
 
 		storer := NewObjectStorer()
 
-		builder.ForEachObject(storer.Store)
+		if err := builder.ForEachObject(storer.Store); err != nil {
+			fmt.Printf("Error persisting objects in the object store: %v\n", err)
+			os.Exit(1)
+		}
 		// Get rid of the cache at this point, we don't need it anymore
 		builder.ClearCache()
-		runtime.GC()
 
 		// create the .git/refs directory
-		CreateRefs(refs)
-		CreateHeads(refs)
+		if err := CreateRefs(refs); err != nil {
+			fmt.Printf("Error creating refs: %v\n", err)
+			os.Exit(1)
+		}
+		if err := CreateHeads(refs); err != nil {
+			fmt.Printf("Error creating HEADs: %v\n", err)
+			os.Exit(1)
+		}
 
 		builder.hashMap = storer.hashMap
 
@@ -465,37 +549,43 @@ func (r *RepoBuilder) WriteIndex(indexEntries []*IndexEntry) error {
 	return os.Rename(tmpf.Name(), git.GitIndexPath)
 }
 
-func CreateHeads(refs map[string][]byte) {
+func CreateHeads(refs map[string][]byte) error {
 	remoteHeadSHA, ok := refs["HEAD"]
 	if !ok {
-		return
+		return fmt.Errorf("HEAD ref not in list of refs")
 	}
 
-	var localHeadName string
+	var localHeadRef string
 	for ref, SHA := range refs {
 		if ref != "HEAD" && slices.Equal(SHA, remoteHeadSHA) {
-			localHeadName = ref
+			localHeadRef = ref
 			break
 		}
 	}
 
-	if localHeadName == "" {
-		return
+	if localHeadRef == "" {
+		return fmt.Errorf("No refs match the HEAD SHA")
 	}
 
 	// Set the remote HEAD ref
-	localRef := strings.Replace(localHeadName, "refs/heads/", "refs/remotes/origin/", 1)
+	localRef := strings.Replace(localHeadRef, "refs/heads/", "refs/remotes/origin/", 1)
 	originHeadPath := fp.Join(".git", "refs/remotes/origin/HEAD")
 	symbolicContent := fmt.Sprintf("ref: %s\n", localRef)
-	os.WriteFile(originHeadPath, []byte(symbolicContent), 0644)
+	if err := os.WriteFile(originHeadPath, []byte(symbolicContent), 0644); err != nil {
+		return err
+	}
 
 	// Create the LOCAL branch ref (e.g., .git/refs/heads/main)
-	localBranchPath := fp.Join(".git", localHeadName)
-	os.MkdirAll(fp.Dir(localBranchPath), 0755)
-	os.WriteFile(localBranchPath, append(remoteHeadSHA, '\n'), 0644)
+	localBranchPath := fp.Join(".git", localHeadRef)
+	if err := os.MkdirAll(fp.Dir(localBranchPath), 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(localBranchPath, append(remoteHeadSHA, '\n'), 0644); err != nil {
+		return err
+	}
 	rootHeadPath := fp.Join(".git", "HEAD")
-	rootHeadContent := fmt.Sprintf("ref: %s\n", localHeadName)
-	os.WriteFile(rootHeadPath, []byte(rootHeadContent), 0644)
+	rootHeadContent := fmt.Sprintf("ref: %s\n", localHeadRef)
+	return os.WriteFile(rootHeadPath, []byte(rootHeadContent), 0644)
 }
 
 func GuessDefaultBranch(refs map[string][]byte) string {
@@ -511,7 +601,7 @@ func GuessDefaultBranch(refs map[string][]byte) string {
 	return ""
 }
 
-func CreateRefs(refs map[string][]byte) {
+func CreateRefs(refs map[string][]byte) error {
 	for ref, SHA := range refs {
 		localRef := strings.Replace(ref, "refs/heads/", "refs/remotes/origin/", 1)
 
@@ -519,16 +609,12 @@ func CreateRefs(refs map[string][]byte) {
 		parentDir := fp.Dir(destPath)
 
 		if err := os.MkdirAll(parentDir, 0755); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			continue
+			return err
 		}
 
-		// 4. Write the SHA as the file content
-		// 'object' is the SHA-1 hash (40 bytes)
-		if err := os.WriteFile(destPath, append(SHA, '\n'), 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		}
+		return os.WriteFile(destPath, append(SHA, '\n'), 0644)
 	}
+	return nil
 }
 
 type ObjectStorer struct {
@@ -628,46 +714,64 @@ func DemuxNegotiationResponse(br *bufio.Reader, res io.Reader) (*os.File, error)
 	return tmp, nil
 }
 
-func NegotiateAndReturnResponse(url string, refs map[string][]byte, commonCaps []byte) io.Reader {
-	reqBody := prepNegotiationRequest(refs, commonCaps)
-	negotiationEndpoint := fmt.Sprintf("%s/git-upload-pack", url)
-	res, _ := http.Post(negotiationEndpoint, git.GitNegotationReqCType, reqBody)
-	if res.StatusCode != http.StatusOK {
-		fmt.Printf("Some yeeyeeass error bro: %d", res.StatusCode)
+func NegotiateAndReturnResponse(url string, refs map[string][]byte, commonCaps []byte) (io.Reader, error) {
+	reqBody, err := prepNegotiationRequest(refs, commonCaps)
+	if err != nil {
+		return nil, fmt.Errorf("Error preparing request body for negotiation: %w", err)
 	}
-	return res.Body
+	negotiationEndpoint := fmt.Sprintf("%s/git-upload-pack", url)
+	res, err := http.Post(negotiationEndpoint, git.GitNegotationReqCType, reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("Negotiation request failed: %w", err)
+	}
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Negotiation request failed: Unexpected response status code %d", res.StatusCode)
+	}
+	return res.Body, nil
 }
 
-func DiscoverRefs(url string, br *bufio.Reader) (map[string][]byte, []byte) {
+func DiscoverRefs(url string, br *bufio.Reader) (map[string][]byte, []byte, error) {
 	str := fmt.Sprintf("%s/info/refs?service=git-upload-pack", url)
 	resp, err := http.Get(str)
 	if err != nil {
-		panic(err)
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotModified {
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("Unexpected status code: %d", resp.StatusCode)
 	}
 
 	br.Reset(resp.Body)
-	firstFive, _ := br.Peek(5)
+	firstFive, err := br.Peek(5)
+	if err != nil {
+		return nil, nil, err
+	}
 	if matched, _ := regexp.Match("^[0-9a-f]", firstFive); !matched {
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("Invalid response: Unexpected characters %s at the start of file", firstFive)
 	}
 
 	// Read till the first flush packet
-	svcName, _ := readPktLine(br)
-	if !bytes.Equal(svcName, []byte("# service=git-upload-pack")) {
-		os.Exit(1)
+	svcName, err := readPktLine(br)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Error reading pktline: %w", err)
 	}
-	readPktLine(br)
+
+	if !bytes.Equal(svcName, []byte("# service=git-upload-pack")) {
+        return nil, nil, fmt.Errorf("Invalid response: Unexpected packet line")
+	}
+
+	if _, err := readPktLine(br); err != nil {
+		return nil, nil, fmt.Errorf("Error reading pktline: %w", err)
+	}
 
 	var commonCaps []byte
 	refs := make(map[string][]byte)
 	for {
 		line, err := readPktLine(br)
-		if err != nil || line == nil {
+		if err != nil {
+			return nil, nil, fmt.Errorf("Error reading pktline: %w", err)
+		} else if line == nil {
 			break
 		}
 		line, caps, found := bytes.Cut(line, []byte{'\x00'})
@@ -675,8 +779,12 @@ func DiscoverRefs(url string, br *bufio.Reader) (map[string][]byte, []byte) {
 			var buf bytes.Buffer
 			for sCap := range strings.SplitSeq(string(caps), " ") {
 				if _, ok := git.C_CAPS[sCap]; ok {
-					buf.WriteString(sCap)
-					buf.WriteByte(' ')
+					if _, err := buf.WriteString(sCap); err != nil {
+						return nil, nil, err
+					}
+					if err := buf.WriteByte(' '); err != nil {
+						return nil, nil, err
+					}
 				}
 			}
 			commonCaps = bytes.TrimSpace(buf.Bytes())
@@ -686,7 +794,7 @@ func DiscoverRefs(url string, br *bufio.Reader) (map[string][]byte, []byte) {
 		}
 		refs[string(line[41:])] = line[:40]
 	}
-	return refs, commonCaps
+	return refs, commonCaps, nil
 }
 
 type PackStreamer struct {
@@ -708,25 +816,40 @@ func (streamer *PackStreamer) getZlibReader() *bufio.Reader {
 	return streamer.zbr
 }
 
-func (streamer *PackStreamer) BuildPackIndex(objectCount uint32) ([]uint64, map[uint64]PackNode) {
+func (streamer *PackStreamer) BuildPackIndex(objectCount uint32) ([]uint64, map[uint64]PackNode, error) {
 	packOrder := make([]uint64, 0, objectCount)
 	packIndex := make(map[uint64]PackNode)
 	for i := 1; uint32(i) <= objectCount; i++ {
-		headerOfs := currentOffset(streamer.f, streamer.br)
-		objType, objSize := readObjHeader(streamer.br)
+		headerOfs, err := currentOffset(streamer.f, streamer.br)
+		if err != nil {
+			return nil, nil, fmt.Errorf("Error getting reader's current cursor position: %w", err)
+		}
+		objType, objSize, err := readObjHeader(streamer.br)
+		if err != nil {
+			return nil, nil, fmt.Errorf("Error reading object header: %w", err)
+		}
 		packOrder = append(packOrder, headerOfs)
 
 		var parentOfs uint64
 		if objType == 6 {
 			// The required negative offet brom the type byte
-			negOfs := readDeltaNegOfs(streamer.br)
+			negOfs, err := readDeltaNegOfs(streamer.br)
+			if err != nil {
+				return nil, nil, fmt.Errorf("Error reading delta object's negative offset: %w", err)
+			}
 			parentOfs = uint64(headerOfs) - negOfs
 		}
 
-		dataOfs := currentOffset(streamer.f, streamer.br)
+		dataOfs, err := currentOffset(streamer.f, streamer.br)
+		if err != nil {
+			return nil, nil, fmt.Errorf("Error getting reader's current cursor position: %w", err)
+		}
 
 		if objType == 6 {
-			srcBufSize, dstBufSize, ops := streamer.parseDeltaObj()
+			srcBufSize, dstBufSize, ops, err := streamer.parseDeltaObj()
+			if err != nil {
+				return nil, nil, fmt.Errorf("Error parsing delta object: %w", err)
+			}
 			packIndex[headerOfs] = &DeltaNode{
 				srcBufSize: srcBufSize,
 				dstBufSize: dstBufSize,
@@ -736,7 +859,9 @@ func (streamer *PackStreamer) BuildPackIndex(objectCount uint32) ([]uint64, map[
 				headerOfs:  headerOfs,
 			}
 		} else {
-			io.Copy(io.Discard, streamer.getZlibReader())
+			if _, err := io.Copy(io.Discard, streamer.getZlibReader()); err != nil {
+				return nil, nil, err
+			}
 			packIndex[headerOfs] = &ObjectNode{
 				objType:    objType,
 				objSize:    objSize,
@@ -745,31 +870,41 @@ func (streamer *PackStreamer) BuildPackIndex(objectCount uint32) ([]uint64, map[
 			}
 		}
 	}
-	return packOrder, packIndex
+	return packOrder, packIndex, nil
 }
 
-func (streamer *PackStreamer) parseDeltaObj() (srcBufSize, dstBufSize uint64, ops []DeltaOps) {
+func (streamer *PackStreamer) parseDeltaObj() (srcBufSize, dstBufSize uint64, ops []DeltaOps, err error) {
 	zbr := streamer.getZlibReader()
 	srcSize, dstSize := readDeltaHeader(zbr)
 	for {
 		b, err := zbr.ReadByte()
-		if errors.Is(err, io.EOF) {
+		if err != nil && errors.Is(err, io.EOF) {
 			break
+		} else if err != nil {
+			return 0, 0, nil, err
 		}
 		if b&0x80 != 0 {
 			copyOfsFlags := (b & git.CopyOffsetFlagsMask)
 			copySizeFlags := (b & git.CopySizeFlagsMask) >> git.CopySizeFlagsShift
-			ofs := readDeltaCopyOffset(copyOfsFlags, zbr)
-			size := readDeltaCopySize(copySizeFlags, zbr)
+			ofs, err := readDeltaCopyOffset(copyOfsFlags, zbr)
+			if err != nil {
+				return 0, 0, nil, err
+			}
+			size, err := readDeltaCopySize(copySizeFlags, zbr)
+			if err != nil {
+				return 0, 0, nil, err
+			}
 			ops = append(ops, CopyOp{Offset: ofs, Size: size})
 		} else {
 			payloadSize := (b & git.InsertSizeMask)
 			insertPayloadBuf := make([]byte, payloadSize)
-			io.ReadFull(zbr, insertPayloadBuf)
+			if _, err := io.ReadFull(zbr, insertPayloadBuf); err != nil {
+				return 0, 0, nil, err
+			}
 			ops = append(ops, InsertOp{PayloadSize: payloadSize, Payload: insertPayloadBuf})
 		}
 	}
-	return srcSize, dstSize, ops
+	return srcSize, dstSize, ops, nil
 }
 
 type IndexEntry struct {
@@ -892,7 +1027,7 @@ func isLastTreeEntry(treeData []byte, delimIdx int) bool {
 	return len(treeData[delimIdx+1:]) <= 20
 }
 
-func prepNegotiationRequest(refs map[string][]byte, negotiated []byte) io.Reader {
+func prepNegotiationRequest(refs map[string][]byte, negotiated []byte) (io.Reader, error) {
 	var i int
 	var buf bytes.Buffer
 	for _, pkt := range refs {
@@ -903,13 +1038,17 @@ func prepNegotiationRequest(refs map[string][]byte, negotiated []byte) io.Reader
 			pktPayload = fmt.Sprintf("want %s\n", pkt)
 		}
 		pktHeader := fmt.Sprintf("%04x", len(pktPayload)+4)
-		buf.WriteString(pktHeader)
-		buf.WriteString(pktPayload)
+		if _, err := buf.WriteString(pktHeader); err != nil {
+			return nil, err
+		}
+		if _, err := buf.WriteString(pktPayload); err != nil {
+			return nil, err
+		}
 		i++
 	}
 	buf.WriteString("0000")
 	buf.WriteString("0009done\n")
-	return &buf
+	return &buf, nil
 }
 
 func validateUploadPackResponse(br *bufio.Reader) error {
@@ -950,9 +1089,10 @@ type PackStats struct {
 	ChainCounts   map[int]int
 }
 
-func (s *PackStats) ProcessResult(res *ObjectResult) {
+func (s *PackStats) ProcessResult(res *ObjectResult) error {
 	printResult(res) // Print as we go
 	s.Observe(res)   // Update counters
+	return nil
 }
 
 func (s *PackStats) Observe(res *ObjectResult) {
@@ -1054,253 +1194,6 @@ func printResult(res *ObjectResult) {
 	}
 }
 
-type copyBuilder struct {
-	packIndex   map[uint64]PackNode
-	packOrder   []uint64
-	packLength  uint32
-	lookupCache map[uint64]*ResolvedObject
-	hashMap     map[string]*ResolvedObject
-	file        *os.File
-	fileInfo    os.FileInfo
-	br          *bufio.Reader
-	zr          io.ReadCloser
-	zw          *zlib.Writer
-	hasher      hash.Hash
-	workingDir  string
-}
-
-// TODO: add verification. This can only be run when some info about the pack is already known.
-func (builder *copyBuilder) ComputePackStats() PackStatsCopy {
-	stats := PackStatsCopy{
-		ChainCounts: make(map[int]int),
-		Results:     make([]*ObjectResult, 0, len(builder.packOrder)),
-	}
-
-	for i, offset := range builder.packOrder {
-		node := builder.packIndex[offset]
-
-		var nxtOfs uint64
-		if i < len(builder.packOrder)-1 {
-			nxtOfs = builder.packOrder[i+1]
-		} else {
-			nxtOfs = uint64(builder.fileInfo.Size() - 20)
-		}
-
-		result := builder.resolveObject(node, offset, nxtOfs)
-
-		// Collect results for printing later
-		stats.Results = append(stats.Results, result)
-
-		// Update stats
-		if result.Depth == 0 {
-			stats.NonDeltaCount++
-		} else {
-			stats.ChainCounts[result.Depth]++
-		}
-	}
-	return stats
-}
-
-func (builder *copyBuilder) BuildIndex() {
-	for i := 1; uint32(i) <= builder.packLength; i++ {
-		headerOfs := currentOffset(builder.file, builder.br)
-		objType, objSize := readObjHeader(builder.br)
-		builder.packOrder = append(builder.packOrder, headerOfs)
-
-		var parentOfs uint64
-		if objType == 6 {
-			// The required negative offet from the type byte
-			negOfs := readDeltaNegOfs(builder.br)
-			parentOfs = uint64(headerOfs) - negOfs
-		}
-
-		dataOfs := currentOffset(builder.file, builder.br)
-		if builder.zr == nil {
-			builder.zr, _ = zlib.NewReader(builder.br)
-		} else {
-			builder.zr.(zlib.Resetter).Reset(builder.br, nil)
-		}
-
-		if objType == 6 {
-			var buf bytes.Buffer
-			srcBufSize, dstBufSize, ops := parseDeltaObjCopy(&buf, builder.zr)
-			builder.packIndex[headerOfs] = &DeltaNode{
-				srcBufSize: srcBufSize,
-				dstBufSize: dstBufSize,
-				parentOfs:  parentOfs,
-				ops:        ops,
-				objSize:    objSize,
-				headerOfs:  headerOfs,
-			}
-		} else {
-			io.Copy(io.Discard, builder.zr)
-			builder.packIndex[headerOfs] = &ObjectNode{
-				objType:    objType,
-				objSize:    objSize,
-				headerOfs:  headerOfs,
-				dataOffset: dataOfs,
-			}
-		}
-	}
-}
-
-func (builder *copyBuilder) getZlibWriter(w io.Writer) *zlib.Writer {
-	if builder.zw == nil {
-		builder.zw = zlib.NewWriter(w)
-	} else {
-		builder.zw.Reset(w)
-	}
-	return builder.zw
-}
-
-func (builder *copyBuilder) Index() map[uint64]PackNode {
-	return builder.packIndex
-}
-
-func (builder *copyBuilder) resolveObject(n PackNode, currHeaderOfs, nxtHeaderOfs uint64) *ObjectResult {
-	resolvedObject := builder.buildObject(n)
-	return &ObjectResult{
-		SHA1:       resolvedObject.SHA1,
-		Type:       resolvedObject.Type,
-		Size:       n.ObjectSize(),
-		PackSize:   nxtHeaderOfs - currHeaderOfs,
-		Offset:     currHeaderOfs,
-		ParentSHA1: resolvedObject.ParentSHA1,
-		Depth:      resolvedObject.Depth,
-	}
-}
-
-func (builder *copyBuilder) resolveDelta(n *DeltaNode) *ResolvedObject {
-	parentResolvedObject := builder.buildObject(builder.Index()[n.ParentOffset()])
-	depth := parentResolvedObject.Depth + 1
-	baseType := parentResolvedObject.Type
-	data := applyDelta(n, parentResolvedObject.Data)
-	hash := builder.ReturnObjectSHA(data, int64(len(data)), baseType)
-	res := &ResolvedObject{
-		SHA1:       hash,
-		Depth:      depth,
-		ParentSHA1: parentResolvedObject.SHA1,
-		Type:       baseType,
-		Data:       data,
-	}
-	return res
-}
-
-func (builder *copyBuilder) ReturnObjectSHA(data []byte, size int64, objType uint8) string {
-	if builder.hasher == nil {
-		builder.hasher = sha1.New()
-	} else {
-		builder.hasher.Reset()
-	}
-	sha := sha1.New()
-	sha.Write(TypeToBytes(objType))
-	sha.Write([]byte(" "))
-	sha.Write([]byte(strconv.FormatInt(int64(len(data)), 10)))
-	sha.Write([]byte{0})
-	sha.Write(data)
-
-	h := hex.EncodeToString(sha.Sum(nil))
-	return h
-}
-
-func (builder *copyBuilder) resolveBase(n *ObjectNode) *ResolvedObject {
-	data := builder.readObjectData(n)
-	hash := builder.ReturnObjectSHA(data, int64(n.objSize), n.objType)
-	objType := n.Type()
-	depth := 0
-	res := &ResolvedObject{
-		SHA1:       hash,
-		Depth:      depth,
-		ParentSHA1: "",
-		Type:       objType,
-		Data:       data,
-	}
-	return res
-}
-
-func (builder *copyBuilder) buildObject(n PackNode) *ResolvedObject {
-	if cached, ok := builder.lookupCache[n.Offset()]; ok {
-		return cached
-	}
-
-	var res *ResolvedObject
-
-	switch Type := n.Type(); Type {
-	case 6:
-		res = builder.resolveDelta(n.(*DeltaNode))
-	default:
-		res = builder.resolveBase(n.(*ObjectNode))
-	}
-	builder.lookupCache[n.Offset()] = res
-
-	return res
-}
-
-func (builder *copyBuilder) readObjectData(n *ObjectNode) []byte {
-	f := builder.file
-	br := builder.br
-	f.Seek(int64(n.dataOffset), 0)
-	br.Reset(f)
-	if builder.zr == nil {
-		builder.zr, _ = zlib.NewReader(builder.br)
-	} else {
-		if reseter, ok := builder.zr.(zlib.Resetter); ok {
-			reseter.Reset(builder.br, nil)
-		}
-	}
-	buf := make([]byte, n.ObjectSize())
-	io.ReadFull(builder.zr, buf)
-	return buf
-}
-
-func (builder *copyBuilder) checkoutRepository(headSHA []byte) *checkoutResult {
-	result := &checkoutResult{indexEntries: make([]*IndexEntry, 0, 32)}
-	headCommit := builder.hashMap[string(headSHA)]
-	treeSHA := returnCommitTreeSHA(headCommit.Data)
-	treeData := builder.hashMap[treeSHA].Data
-	builder.buildRepository("", treeData, result)
-	return result
-}
-
-// When I see a tree:
-// 1. I need to create a directory for it.
-// 2. I need to parse the contents of the tree into it's own directory
-// 3. Repeat
-func (builder *copyBuilder) buildRepository(workingDir string, treeData []byte, result *checkoutResult) {
-	treeEntries := parseTree(treeData)
-	for _, treeEntry := range treeEntries {
-		if treeEntry.mode != git.GitDirMode {
-			// write the files
-			filepath := fp.Join(workingDir, treeEntry.name)
-			os.WriteFile(filepath, builder.hashMap[treeEntry.sha1].Data, TranslateGitMode(treeEntry.mode))
-			fileInfo, _ := os.Lstat(filepath)
-			shaBytes, _ := hex.DecodeString(treeEntry.sha1)
-			stat := fileInfo.Sys().(*syscall.Stat_t)
-			lengthFlag := min(len(filepath), 0x0FFF)
-			result.indexEntries = append(result.indexEntries, &IndexEntry{
-				CtimeSec:  uint32(stat.Ctim.Sec),
-				CtimeNano: uint32(stat.Ctim.Nsec),
-				MtimeSec:  uint32(stat.Mtim.Sec),
-				MtimeNano: uint32(stat.Mtim.Nsec),
-				Dev:       uint32(stat.Dev),
-				Ino:       uint32(stat.Ino),
-				Mode:      uint32(TranslateGitModeToUint(treeEntry.mode)),
-				UID:       uint32(stat.Uid),
-				GID:       uint32(stat.Gid),
-				Size:      uint32(fileInfo.Size()),
-				SHA:       [20]byte(shaBytes),
-				Flags:     uint16(lengthFlag),
-				Path:      filepath,
-			})
-		} else {
-			curDir := fp.Join(workingDir, treeEntry.name)
-			os.MkdirAll(curDir, 0755)
-			treeData := builder.hashMap[treeEntry.sha1].Data
-			builder.buildRepository(fp.Join(workingDir, treeEntry.name), treeData, result)
-		}
-	}
-}
-
 type objectBuilder struct {
 	packIndex   map[uint64]PackNode
 	lookupCache map[uint64]*ResolvedObject
@@ -1315,19 +1208,22 @@ type objectBuilder struct {
 }
 
 // TODO: add verification. This can only be run when some info about the pack is already known.
-func (builder *objectBuilder) ForEachObject(fn func(res *ResolvedObject) error) {
+func (builder *objectBuilder) ForEachObject(fn func(res *ResolvedObject) error) error {
 	for _, offset := range builder.packOrder {
 		node := builder.packIndex[offset]
 		result := builder.buildObject(node)
-		fn(result)
+		if err := fn(result); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (builder *objectBuilder) ClearCache() {
 	builder.lookupCache = nil
 }
 
-func (builder *objectBuilder) ForEachObjectResult(fn func(res *ObjectResult)) {
+func (builder *objectBuilder) ForEachObjectResult(fn func(res *ObjectResult) error) error {
 	for i, offset := range builder.packOrder {
 		node := builder.packIndex[offset]
 
@@ -1340,8 +1236,11 @@ func (builder *objectBuilder) ForEachObjectResult(fn func(res *ObjectResult)) {
 
 		result := builder.resolveObject(node, offset, nxtOfs)
 
-		fn(result)
+		if err := fn(result); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (builder *objectBuilder) Index() map[uint64]PackNode {
@@ -1559,11 +1458,14 @@ func applyDelta(d *DeltaNode, srcBuf []byte) []byte {
 	return dstBuf
 }
 
-func currentOffset(f *os.File, br *bufio.Reader) uint64 {
-	fofs, _ := f.Seek(0, 1)
+func currentOffset(f *os.File, br *bufio.Reader) (uint64, error) {
+	fofs, err := f.Seek(0, 1)
+	if err != nil {
+		return 0, err
+	}
 	currOfs := fofs - int64(br.Buffered())
 
-	return uint64(currOfs)
+	return uint64(currOfs), nil
 }
 
 type PackNode interface {
@@ -1665,12 +1567,15 @@ func parseDeltaObjCopy(buf *bytes.Buffer, zr io.ReadCloser) (srcBufSize, dstBufS
 	return srcSize, dstSize, ops
 }
 
-func readObjHeader(br *bufio.Reader) (byte, uint64) {
+func readObjHeader(br *bufio.Reader) (byte, uint64, error) {
 	var i int
 	var objSize uint64
 	var objType byte
 	for {
-		b, _ := br.ReadByte()
+		b, err := br.ReadByte()
+		if err != nil {
+			return 0, 0, err
+		}
 		if i == 0 {
 			objSize = uint64(b & 0b00001111)
 			objType = (b & 0b01110000) >> 4
@@ -1682,7 +1587,7 @@ func readObjHeader(br *bufio.Reader) (byte, uint64) {
 		}
 		i++
 	}
-	return objType, objSize
+	return objType, objSize, nil
 }
 
 // There are two sizes to read
@@ -1728,27 +1633,33 @@ func readDeltaSize(r *bufio.Reader) uint64 {
 	return size
 }
 
-func readDeltaCopyOffset(ofsFlags byte, br *bufio.Reader) (ofs uint64) {
+func readDeltaCopyOffset(ofsFlags byte, br *bufio.Reader) (ofs uint64, err error) {
 	for i := range git.CopyOffsetFlagsLen {
 		if (0b00000001 & (ofsFlags >> i)) == 1 {
-			b, _ := br.ReadByte()
+			b, err := br.ReadByte()
+			if err != nil {
+				return 0, err
+			}
 			ofs |= uint64(b) << (8 * i)
 		}
 	}
-	return ofs
+	return ofs, nil
 }
 
-func readDeltaCopySize(sizeFlags byte, br *bufio.Reader) (size uint64) {
+func readDeltaCopySize(sizeFlags byte, br *bufio.Reader) (size uint64, err error) {
 	for i := range git.CopySizeFlagsLen {
 		if (0b00000001 & (sizeFlags >> i)) == 1 {
-			b, _ := br.ReadByte()
+			b, err := br.ReadByte()
+			if err != nil {
+				return 0, err
+			}
 			size |= uint64(b) << (8 * i)
 		}
 	}
 	if size == 0 {
-		return git.CopySizeZero
+		return git.CopySizeZero, nil
 	}
-	return size
+	return size, nil
 }
 
 func readDeltaCopyOffsetCopy(ofsFlags byte, br *bytes.Buffer) (ofs uint64) {
@@ -1774,7 +1685,7 @@ func readDeltaCopySizeCopy(sizeFlags byte, br *bytes.Buffer) (size uint64) {
 	return size
 }
 
-func readDeltaNegOfs(br *bufio.Reader) uint64 {
+func readDeltaNegOfs(br *bufio.Reader) (uint64, error) {
 	var i uint64
 	var size uint64
 
@@ -1783,14 +1694,17 @@ func readDeltaNegOfs(br *bufio.Reader) uint64 {
 			// The +1 rule
 			size++
 		}
-		b, _ := br.ReadByte()
+		b, err := br.ReadByte()
+		if err != nil {
+			return 0, err
+		}
 		size = size<<7 | uint64(b&0b01111111)
 		if b&0x80 == 0 {
 			break
 		}
 		i++
 	}
-	return size
+	return size, nil
 }
 
 func TypeToBytes(input uint8) []byte {
@@ -1812,14 +1726,14 @@ func TypeToBytes(input uint8) []byte {
 	}
 }
 
-func parseTreeObject(treeObject []byte, nameonly bool) []string {
+func parseTreeObject(treeObject []byte, nameonly bool) ([]string, error) {
 	var out []string
 	for {
 		spaceIdx := bytes.IndexByte(treeObject, ' ')
 		delimIdx := bytes.IndexByte(treeObject, '\x00')
 
 		if spaceIdx == -1 || delimIdx == -1 {
-			fmt.Fprintf(os.Stderr, "Unexpected absence of delim byte")
+			return nil, fmt.Errorf("Unexpected absence of delim byte")
 		}
 
 		modei := string(treeObject[:spaceIdx])
@@ -1842,7 +1756,7 @@ func parseTreeObject(treeObject []byte, nameonly bool) []string {
 
 		treeObject = treeObject[delimIdx+21:]
 	}
-	return out
+	return out, nil
 }
 
 type GitTreeEntry struct {
@@ -1861,7 +1775,7 @@ type TreeBuilder struct {
 }
 
 // TODO: maybe use goroutines here for performance.
-func (b *TreeBuilder) generateTreePayload(cwd []fs.DirEntry, currentPath string) *bytes.Buffer {
+func (b *TreeBuilder) generateTreePayload(cwd []fs.DirEntry, currentPath string) (*bytes.Buffer, error) {
 	var entries []GitTreeEntry
 	for _, e := range cwd {
 		if e.Name() == ".git" {
@@ -1869,12 +1783,18 @@ func (b *TreeBuilder) generateTreePayload(cwd []fs.DirEntry, currentPath string)
 		} else if e.IsDir() {
 			sd, err := os.ReadDir(fp.Join(currentPath, e.Name()))
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error walking current working directory: %v\n", err)
+				return nil, fmt.Errorf("Error walking current working directory: %v\n", err)
 			}
 
-			subtreePayload := b.generateTreePayload(sd, fp.Join(currentPath, e.Name()))
+			subtreePayload, err := b.generateTreePayload(sd, fp.Join(currentPath, e.Name()))
+			if err != nil {
+				return nil, err
+			}
 
-			hsum := b.writeAndGetHash("tree", subtreePayload.Len(), subtreePayload)
+			hsum, err := b.writeAndGetHash("tree", subtreePayload.Len(), subtreePayload)
+			if err != nil {
+				return nil, fmt.Errorf("Error writing and hashing object data: %v", err)
+			}
 
 			entry := GitTreeEntry{
 				Mode: git.GitDirMode,
@@ -1885,9 +1805,15 @@ func (b *TreeBuilder) generateTreePayload(cwd []fs.DirEntry, currentPath string)
 
 		} else if !e.IsDir() {
 
-			f, finfo := files.OpenFile(fp.Join(currentPath, e.Name()))
+			f, finfo, err := files.OpenFile(fp.Join(currentPath, e.Name()))
+			if err != nil {
+				return nil, fmt.Errorf("Error opening file: %v", err)
+			}
 
-			hsum := b.writeAndGetHash("blob", int(finfo.Size()), f)
+			hsum, err := b.writeAndGetHash("blob", int(finfo.Size()), f)
+			if err != nil {
+				return nil, fmt.Errorf("Error writing and hashing object data: %v", err)
+			}
 
 			fmode := finfo.Mode().Perm()
 			var mode string
@@ -1928,16 +1854,20 @@ func (b *TreeBuilder) generateTreePayload(cwd []fs.DirEntry, currentPath string)
 		buf.Write(e.Hash)
 	}
 
-	return buf
+	return buf, nil
 }
 
-func (b *TreeBuilder) writeAndGetHash(objectType string, payloadSize int, payload io.Reader) []byte {
+func (b *TreeBuilder) writeAndGetHash(objectType string, payloadSize int, payload io.Reader) ([]byte, error) {
 	tmpf := files.CreateTempObjFile()
 	b.hash.Reset()
 	b.zw.Reset(tmpf)
 	mw := io.MultiWriter(b.hash, b.zw)
-	files.WriteGitObject(mw, objectType, payloadSize, payload)
-	b.zw.Close()
+	if err := files.WriteGitObject(mw, objectType, payloadSize, payload); err != nil {
+		return nil, fmt.Errorf("Error writing object to disk: %v", err)
+	}
+	if err := b.zw.Close(); err != nil {
+		return nil, err
+	}
 	tmpf.Close()
 
 	hsum := b.hash.Sum(nil)
@@ -1945,14 +1875,12 @@ func (b *TreeBuilder) writeAndGetHash(objectType string, payloadSize int, payloa
 	objDirName, objFileName := hashes.DecomposeHash(h)
 	err := os.MkdirAll(fp.Join(git.GitObjDir, objDirName), 0775)
 	if err != nil && !errors.Is(err, fs.ErrExist) {
-		fmt.Fprintf(os.Stderr, "Error creating dir: %v\n", err)
-		os.Exit(1)
+		return nil, err
 	}
 
 	objFilePath := fp.Join(git.GitObjDir, objDirName, objFileName)
 	if err := os.Rename(tmpf.Name(), objFilePath); err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating object: %v\n", err)
-		os.Exit(1)
+		return nil, err
 	}
-	return hsum
+	return hsum, nil
 }

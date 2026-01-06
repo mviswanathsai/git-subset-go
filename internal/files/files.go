@@ -16,28 +16,27 @@ func CreateTempObjFile() *os.File {
 	return tmpf
 }
 
-func OpenFile(filename string) (*os.File, os.FileInfo) {
+func OpenFile(filename string) (*os.File, os.FileInfo, error) {
 	info, err := os.Stat(filename)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error fetching file info: %v\n", err)
-		os.Exit(1)
+		return nil, nil, err
 	}
 
 	df, err := os.Open(filename)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
-		os.Exit(1)
+		return nil, nil, err
 	}
-	return df, info
+	return df, info, nil
 }
 
 // The caller is responsible for closing the writers as necessary.
-func WriteGitObject(writer io.Writer, objType string, payloadSize int, payload io.Reader) {
+func WriteGitObject(writer io.Writer, objType string, payloadSize int, payload io.Reader) error {
 	header := fmt.Sprintf("%s %d\x00", objType, payloadSize)
 	if _, err := writer.Write([]byte(header)); err != nil {
-		fmt.Fprintf(os.Stderr, "Error writing object: %v\n", err)
+		return err
 	}
 	if _, err := io.Copy(writer, payload); err != nil {
-		fmt.Fprintf(os.Stderr, "Error writing object: %v\n", err)
+		return err
 	}
+    return nil
 }
