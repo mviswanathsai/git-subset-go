@@ -51,12 +51,11 @@ func main() {
 
 	case "cat-file":
 		objhash := os.Args[3]
-		blobdir := objhash[:2]
-		blobname := objhash[2:]
+        objDirName, objFileName := hashes.DecomposeHash(objhash)
 
 		// we first need to open the file
-		filename := fp.Join(git.GitObjDir, blobdir, blobname)
-		f, err := os.Open(filename)
+		filePath := fp.Join(git.GitObjDir, objDirName, objFileName)
+		f, err := os.Open(filePath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error opening file: %v\n", err)
 			os.Exit(1)
@@ -80,14 +79,14 @@ func main() {
 		}
 
 	case "hash-object":
-		var filename string
+		var filePath string
 		var write bool
 
 		if len(os.Args) == 3 {
-			filename = os.Args[2]
+			filePath = os.Args[2]
 		} else if len(os.Args) == 4 {
 			if os.Args[2] == "-w" {
-				filename = os.Args[3]
+				filePath = os.Args[3]
 				write = true
 			} else {
 				fmt.Fprintf(os.Stderr, "Unknown flag %s for command hash-object\n", os.Args[2])
@@ -95,7 +94,7 @@ func main() {
 			}
 		}
 
-		f, finfo, err := files.OpenFile(filename)
+		f, finfo, err := files.OpenFile(filePath)
 		if err != nil {
 			fmt.Printf("Error opening object file: %v", err)
 			os.Exit(1)
