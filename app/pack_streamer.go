@@ -34,8 +34,21 @@ func (streamer *PackStreamer) getZlibReader() *bufio.Reader {
 	return streamer.zbr
 }
 
-func (streamer *PackStreamer) readPackHeader() (version, objectCount uint32, err error) {
-    streamer.br.Reset(streamer.f)
+func (streamer *PackStreamer) ReadPackAndBuildIndex() (packOrder []uint64, packIndex map[uint64]PackNode, err error) {
+	_, objCount, err := streamer.ReadPackHeader()
+	if err != nil {
+		return nil, nil, fmt.Errorf("Pack header invalid: %v\n", err)
+	}
+
+	packOrder, packIndex, err = streamer.BuildPackIndex(objCount)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Error building pack index: %v\n", err)
+	}
+	return packOrder, packIndex, err
+}
+
+func (streamer *PackStreamer) ReadPackHeader() (version, objectCount uint32, err error) {
+	streamer.br.Reset(streamer.f)
 	buf := make([]byte, 12)
 
 	io.ReadFull(streamer.br, buf)
@@ -49,7 +62,7 @@ func (streamer *PackStreamer) readPackHeader() (version, objectCount uint32, err
 	return version, objectCount, nil
 }
 
-func (streamer *PackStreamer) verifyPackTrailer() ([]byte, error) {
+func (streamer *PackStreamer) VerifyPackTrailer() ([]byte, error) {
 	defer streamer.h.Reset()
 	defer streamer.f.Seek(0, io.SeekStart)
 

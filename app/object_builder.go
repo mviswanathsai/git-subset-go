@@ -13,7 +13,7 @@ import (
 	"strconv"
 )
 
-type objectBuilder struct {
+type ObjectBuilder struct {
 	packIndex   map[uint64]PackNode
 	lookupCache map[uint64]*ResolvedObject
 	hashMap     map[string]*ResolvedObject
@@ -22,12 +22,11 @@ type objectBuilder struct {
 	fileInfo    os.FileInfo
 	br          *bufio.Reader
 	zr          io.ReadCloser
-	hasher      hash.Hash
-	packLength  uint32
+    h      hash.Hash
 }
 
 // TODO: add verification. This can only be run when some info about the pack is already known.
-func (builder *objectBuilder) ForEachObject(fn func(res *ResolvedObject) error) error {
+func (builder *ObjectBuilder) ForEachObject(fn func(res *ResolvedObject) error) error {
 	for _, offset := range builder.packOrder {
 		node := builder.packIndex[offset]
 		result := builder.buildObject(node)
@@ -38,11 +37,11 @@ func (builder *objectBuilder) ForEachObject(fn func(res *ResolvedObject) error) 
 	return nil
 }
 
-func (builder *objectBuilder) ClearCache() {
+func (builder *ObjectBuilder) ClearCache() {
 	builder.lookupCache = nil
 }
 
-func (builder *objectBuilder) ForEachObjectResult(fn func(res *ObjectResult) error) error {
+func (builder *ObjectBuilder) ForEachObjectResult(fn func(res *ObjectResult) error) error {
 	for i, offset := range builder.packOrder {
 		node := builder.packIndex[offset]
 
@@ -62,11 +61,11 @@ func (builder *objectBuilder) ForEachObjectResult(fn func(res *ObjectResult) err
 	return nil
 }
 
-func (builder *objectBuilder) Index() map[uint64]PackNode {
+func (builder *ObjectBuilder) Index() map[uint64]PackNode {
 	return builder.packIndex
 }
 
-func (builder *objectBuilder) resolveObject(n PackNode, currHeaderOfs, nxtHeaderOfs uint64) *ObjectResult {
+func (builder *ObjectBuilder) resolveObject(n PackNode, currHeaderOfs, nxtHeaderOfs uint64) *ObjectResult {
 	resolvedObject := builder.buildObject(n)
 	return &ObjectResult{
 		SHA1:       resolvedObject.SHA1,
@@ -79,7 +78,7 @@ func (builder *objectBuilder) resolveObject(n PackNode, currHeaderOfs, nxtHeader
 	}
 }
 
-func (builder *objectBuilder) resolveDelta(n *DeltaNode) *ResolvedObject {
+func (builder *ObjectBuilder) resolveDelta(n *DeltaNode) *ResolvedObject {
 	parentResolvedObject := builder.buildObject(builder.Index()[n.ParentOffset()])
 	depth := parentResolvedObject.Depth + 1
 	baseType := parentResolvedObject.Type
@@ -95,24 +94,23 @@ func (builder *objectBuilder) resolveDelta(n *DeltaNode) *ResolvedObject {
 	return res
 }
 
-func (builder *objectBuilder) ReturnObjectSHA(data []byte, size int64, objType uint8) string {
-	if builder.hasher == nil {
-		builder.hasher = sha1.New()
+func (builder *ObjectBuilder) ReturnObjectSHA(data []byte, size int64, objType uint8) string {
+	if builder.h == nil {
+		builder.h = sha1.New()
 	} else {
-		builder.hasher.Reset()
+		builder.h.Reset()
 	}
-	sha := sha1.New()
-	sha.Write(TypeToBytes(objType))
-	sha.Write([]byte(" "))
-	sha.Write([]byte(strconv.FormatInt(int64(len(data)), 10)))
-	sha.Write([]byte{0})
-	sha.Write(data)
+	builder.h.Write(TypeToBytes(objType))
+	builder.h.Write([]byte(" "))
+	builder.h.Write([]byte(strconv.FormatInt(int64(len(data)), 10)))
+	builder.h.Write([]byte{0})
+	builder.h.Write(data)
 
-	h := hex.EncodeToString(sha.Sum(nil))
-	return h
+	sha := hex.EncodeToString(builder.h.Sum(nil))
+	return sha
 }
 
-func (builder *objectBuilder) resolveBase(n *ObjectNode) *ResolvedObject {
+func (builder *ObjectBuilder) resolveBase(n *ObjectNode) *ResolvedObject {
 	data := builder.readObjectData(n)
 	hash := builder.ReturnObjectSHA(data, int64(n.objSize), n.objType)
 	objType := n.Type()
@@ -127,7 +125,7 @@ func (builder *objectBuilder) resolveBase(n *ObjectNode) *ResolvedObject {
 	return res
 }
 
-func (builder *objectBuilder) buildObject(n PackNode) *ResolvedObject {
+func (builder *ObjectBuilder) buildObject(n PackNode) *ResolvedObject {
 	if cached, ok := builder.lookupCache[n.Offset()]; ok {
 		return cached
 	}
@@ -145,7 +143,7 @@ func (builder *objectBuilder) buildObject(n PackNode) *ResolvedObject {
 	return res
 }
 
-func (builder *objectBuilder) readObjectData(n *ObjectNode) []byte {
+func (builder *ObjectBuilder) readObjectData(n *ObjectNode) []byte {
 	f := builder.file
 	br := builder.br
 	f.Seek(int64(n.dataOffset), 0)

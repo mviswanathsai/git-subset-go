@@ -279,31 +279,26 @@ func main() {
 			zbr: nil,
 		}
 
-		if _, err := streamer.verifyPackTrailer(); err != nil {
+		if _, err := streamer.VerifyPackTrailer(); err != nil {
 			fmt.Fprintf(os.Stderr, "Invalid Pack: %v", err)
 			os.Exit(1)
 		}
 
-		_, objCount, err := streamer.readPackHeader()
+		packOrder, packIndex, err := streamer.ReadPackAndBuildIndex()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Pack header invalid: %v", err)
 			os.Exit(1)
 		}
 
-		packOrder, packIndex, err := streamer.BuildPackIndex(objCount)
-		if err != nil {
-			fmt.Printf("Error building pack index: %v", err)
-			os.Exit(1)
-		}
-
-		builder := &objectBuilder{
+		builder := &ObjectBuilder{
 			packIndex:   packIndex,
 			lookupCache: make(map[uint64]*ResolvedObject),
 			packOrder:   packOrder,
 			br:          br,
+			zr:          streamer.zr,
 			file:        pf,
 			fileInfo:    fileInfo,
-			hasher:      h,
+			h:           h,
 		}
 
 		stats := &ObjectStats{
@@ -365,6 +360,17 @@ func main() {
 		url := os.Args[2]
 		workingDir := os.Args[3]
 
+		err := os.MkdirAll(fp.Join(workingDir, git.GitObjDir), 0775)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating repo dir: %v\n", err)
+			os.Exit(1)
+		}
+
+		if err := os.Chdir(workingDir); err != nil {
+			fmt.Printf("failed to enter repository directory %q: %v\n", workingDir, err)
+			os.Exit(1)
+		}
+
 		br := bufio.NewReader(nil)
 
 		refs, commonCaps, err := DiscoverRefs(url, br)
@@ -385,7 +391,6 @@ func main() {
 			os.Exit(1)
 		}
 
-		// create the .git directory and packfile
 		fileInfo, err := os.Stat(tmp.Name())
 		if err != nil {
 			fmt.Printf("Error opening packfile: %v", err)
@@ -393,18 +398,20 @@ func main() {
 		}
 
 		streamer := &PackStreamer{
-			f:  tmp,
-			br: br,
-			h:  sha1.New(),
+			f:     tmp,
+			br:    br,
+			h:     sha1.New(),
+			fInfo: fileInfo,
 		}
 
-		checksum, err := streamer.verifyPackTrailer()
+		checksum, err := streamer.VerifyPackTrailer()
 		if err != nil {
 			fmt.Printf("Invalid packfile received: %v", err)
+			os.Remove(tmp.Name())
 			os.Exit(1)
 		}
 
-		err = os.MkdirAll(fp.Join(workingDir, git.GitObjDir, "pack"), 0775)
+		err = os.MkdirAll(fp.Join(git.GitObjDir, "pack"), 0775)
 		if err != nil && !errors.Is(err, fs.ErrExist) {
 			fmt.Fprintf(os.Stderr, "Error creating pack dir: %v\n", err)
 			os.Exit(1)
@@ -413,40 +420,28 @@ func main() {
 		// Git actually calculates a different hash for the packfile name. But that isn't
 		// super important for this demonstration.
 		packFile := fp.Join(git.GitObjDir, "pack", fmt.Sprintf("pack-%x.pack", checksum))
-		if err := os.Rename(tmp.Name(), fp.Join(workingDir, packFile)); err != nil {
+		if err := os.Rename(tmp.Name(), packFile); err != nil {
 			fmt.Printf("Error writing packfile: %v\n", err)
 		}
 
-		if err := os.Chdir(workingDir); err != nil {
-			fmt.Printf("failed to enter repository directory %q: %v\n", workingDir, err)
-			os.Exit(1)
-		}
+		pf := tmp
 
-		_, objCount, err := streamer.readPackHeader()
+		packOrder, packIndex, err := streamer.ReadPackAndBuildIndex()
 		if err != nil {
-			fmt.Printf("Pack header invalid: %v\n", err)
+			fmt.Printf("Error processing packfile: %v\n", err)
 			os.Exit(1)
 		}
 
-		packOrder, packIndex, err := streamer.BuildPackIndex(objCount)
-		if err != nil {
-			fmt.Printf("Error building pack index: %v\n", err)
-			os.Exit(1)
-		}
-
-		var zr io.ReadCloser
-
-		builder := &objectBuilder{
+		builder := &ObjectBuilder{
 			packIndex:   packIndex,
 			lookupCache: make(map[uint64]*ResolvedObject),
 			packOrder:   packOrder,
 			hashMap:     make(map[string]*ResolvedObject),
-			packLength:  objCount,
 			br:          br,
 			file:        pf,
 			fileInfo:    fileInfo,
-			zr:          zr,
-			hasher:      sha1.New(),
+			zr:          streamer.zr,
+			h:           sha1.New(),
 		}
 
 		storer := NewObjectStorer()
@@ -456,6 +451,7 @@ func main() {
 			os.Exit(1)
 		}
 		// Get rid of the cache at this point, we don't need it anymore
+		// Doesn't change much in terms of performance.
 		builder.ClearCache()
 
 		repoBuilder := &RepoBuilder{

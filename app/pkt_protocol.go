@@ -14,9 +14,10 @@ import (
 	"github.com/codecrafters-io/git-starter-go/internal/git"
 )
 
+// Writes the status to stderr and returns the packfile descriptor
 func DemuxNegotiationResponse(br *bufio.Reader, res io.Reader) (*os.File, error) {
 	br.Reset(res)
-	tmp, err := os.CreateTemp(".", "tmp_pack_")
+	tmp, err := os.CreateTemp(git.GitObjDir, "tmp_pack_")
 	if err != nil {
 		return nil, fmt.Errorf("Error creating temp pack file: %w", err)
 	}

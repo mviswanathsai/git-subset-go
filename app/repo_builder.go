@@ -171,7 +171,9 @@ func (builder *RepoBuilder) CreateRefs() error {
 			return err
 		}
 
-		return os.WriteFile(destPath, append(SHA, '\n'), 0644)
+        if err := os.WriteFile(destPath, append(SHA, '\n'), 0644); err != nil {
+            return err
+        }
 	}
 	return nil
 }
