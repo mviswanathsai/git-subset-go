@@ -189,7 +189,10 @@ func handleWriteTree(args []string) error {
 		return fmt.Errorf("Error generating tree payload: %v", err)
 	}
 
-	tmpf := files.CreateTempObjFile()
+	tmpf, err := files.CreateTempObjFile()
+	if err != nil {
+		return fmt.Errorf("Error generating tree payload: %v", err)
+	}
 	defer os.Remove(tmpf.Name())
 
 	hash.Reset()
@@ -225,12 +228,32 @@ func handleCommitTree(args []string) error {
 	parentSha := flagset.String("p", "", "ID of the parent commit object")
 	message := flagset.String("m", "", "Commit message")
 
-	flagset.Parse(args)
+	// We'll store the positional args (Tree SHA) here
+	var positional []string
 
-	if flagset.NArg() < 1 {
+	for len(args) > 0 {
+		err := flagset.Parse(args)
+		if err != nil {
+			return err
+		}
+		// flagset.Args() contains everything the parser stopped at
+		// (the first thing that didn't start with '-')
+		remaining := flagset.Args()
+		if len(remaining) > 0 {
+			// Save the positional arg
+			positional = append(positional, remaining[0])
+			// Continue parsing from the NEXT argument
+			args = remaining[1:]
+		} else {
+			// Nothing left to parse
+			args = nil
+		}
+	}
+
+	if len(positional) < 1 {
 		return fmt.Errorf("missing tree SHA")
 	}
-	treeSha := flagset.Arg(0)
+	treeSha := positional[0]
 
 	author := "Teenus Lorvalds"
 	email := "teenus@lorvalds.com"
@@ -245,9 +268,9 @@ func handleCommitTree(args []string) error {
 	fmt.Fprintf(buf, "\n%s\n", *message)
 
 	tmpf, err := files.CreateTempObjFile()
-    if err != nil {
-        return err
-    }
+	if err != nil {
+		return err
+	}
 
 	hash := sha1.New()
 	zw := zlib.NewWriter(tmpf)

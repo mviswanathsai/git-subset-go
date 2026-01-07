@@ -108,7 +108,10 @@ func (b *TreeBuilder) generateTreePayload(cwd []fs.DirEntry, currentPath string)
 }
 
 func (b *TreeBuilder) writeAndGetHash(objectType string, payloadSize int, payload io.Reader) ([]byte, error) {
-	tmpf := files.CreateTempObjFile()
+	tmpf, err := files.CreateTempObjFile()
+	if err != nil {
+		return nil, fmt.Errorf("Error writing object to disk: %v", err)
+	}
 	b.hash.Reset()
 	b.zw.Reset(tmpf)
 	mw := io.MultiWriter(b.hash, b.zw)
@@ -123,8 +126,7 @@ func (b *TreeBuilder) writeAndGetHash(objectType string, payloadSize int, payloa
 	hsum := b.hash.Sum(nil)
 	h := hex.EncodeToString(hsum)
 	objDirName, objFileName := hashes.DecomposeHash(h)
-	err := os.MkdirAll(fp.Join(git.GitObjDir, objDirName), 0775)
-	if err != nil && !errors.Is(err, fs.ErrExist) {
+	if err := os.MkdirAll(fp.Join(git.GitObjDir, objDirName), 0775); err != nil && !errors.Is(err, fs.ErrExist) {
 		return nil, err
 	}
 
