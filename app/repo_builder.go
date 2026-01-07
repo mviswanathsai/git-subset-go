@@ -108,13 +108,13 @@ func (builder *RepoBuilder) buildRepository(currentDir string, treeData []byte, 
 				Path:      filepath,
 			})
 		} else {
-			currentDir = fp.Join(currentDir, treeEntry.name)
-			if err := os.MkdirAll(currentDir, 0755); err != nil {
+            dirPath := fp.Join(currentDir, treeEntry.name)
+			if err := os.MkdirAll(dirPath, 0755); err != nil {
                 fmt.Printf("err here")
 				return err
 			}
 			treeData := builder.objectSource[treeEntry.sha1].Data
-			if err := builder.buildRepository(currentDir, treeData, result); err != nil {
+			if err := builder.buildRepository(dirPath, treeData, result); err != nil {
 				return err
 			}
 		}
