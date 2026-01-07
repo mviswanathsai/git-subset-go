@@ -65,7 +65,7 @@ func (builder *RepoBuilder) CheckoutCommit(commitSHA []byte) (*checkoutResult, e
 	treeSHA := returnCommitTreeSHA(headCommit.Data)
 	treeData := builder.objectSource[treeSHA].Data
 	if err := builder.buildRepository("", treeData, result); err != nil {
-        return nil, fmt.Errorf("Error building repository: %w", err)
+		return nil, fmt.Errorf("Error building repository: %w", err)
 	}
 	return result, nil
 }
@@ -108,9 +108,9 @@ func (builder *RepoBuilder) buildRepository(currentDir string, treeData []byte, 
 				Path:      filepath,
 			})
 		} else {
-            dirPath := fp.Join(currentDir, treeEntry.name)
+			dirPath := fp.Join(currentDir, treeEntry.name)
 			if err := os.MkdirAll(dirPath, 0755); err != nil {
-                fmt.Printf("err here")
+				fmt.Printf("err here")
 				return err
 			}
 			treeData := builder.objectSource[treeEntry.sha1].Data
@@ -172,9 +172,9 @@ func (builder *RepoBuilder) CreateRefs() error {
 			return err
 		}
 
-        if err := os.WriteFile(destPath, append(SHA, '\n'), 0644); err != nil {
-            return err
-        }
+		if err := os.WriteFile(destPath, append(SHA, '\n'), 0644); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -290,4 +290,24 @@ func TranslateGitModeToFileMode(gitMode string) os.FileMode {
 	default:
 		return 0644
 	}
+}
+
+func returnCommitTreeSHA(commitData []byte) string {
+	start := bytes.IndexByte(commitData, ' ')
+	if start == -1 {
+		return ""
+	}
+
+	end := bytes.IndexByte(commitData[start:], '\n')
+	if end == -1 {
+		return string(bytes.TrimSpace(commitData[start+1:]))
+	}
+
+	// start+1 moves past the space
+	// start+end is the absolute index of the newline
+	return string(bytes.TrimSpace(commitData[start+1 : start+end]))
+}
+
+type checkoutResult struct {
+	indexEntries []*IndexEntry
 }

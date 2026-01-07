@@ -55,7 +55,7 @@ func (s *ObjectStorer) Store(obj *ResolvedObject) error {
 
 func (s *ObjectStorer) writeCompressed(w io.Writer, obj *ResolvedObject) error {
 	s.zw.Reset(w)
-	s.zw.Write(TypeToBytes(obj.Type))
+	s.zw.Write(git.TypeToBytes(obj.Type))
 	s.zw.Write([]byte{' '})
 	s.zw.Write(fmt.Appendf(nil, "%d", len(obj.Data)))
 	s.zw.Write([]byte{'\x00'})

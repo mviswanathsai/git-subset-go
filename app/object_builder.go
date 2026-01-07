@@ -11,6 +11,8 @@ import (
 	"os"
 	"sort"
 	"strconv"
+
+	"github.com/codecrafters-io/git-starter-go/internal/git"
 )
 
 type ObjectBuilder struct {
@@ -22,7 +24,7 @@ type ObjectBuilder struct {
 	fileInfo    os.FileInfo
 	br          *bufio.Reader
 	zr          io.ReadCloser
-    h      hash.Hash
+	h           hash.Hash
 }
 
 // TODO: add verification. This can only be run when some info about the pack is already known.
@@ -100,7 +102,7 @@ func (builder *ObjectBuilder) ReturnObjectSHA(data []byte, size int64, objType u
 	} else {
 		builder.h.Reset()
 	}
-	builder.h.Write(TypeToBytes(objType))
+	builder.h.Write(git.TypeToBytes(objType))
 	builder.h.Write([]byte(" "))
 	builder.h.Write([]byte(strconv.FormatInt(int64(len(data)), 10)))
 	builder.h.Write([]byte{0})
@@ -171,7 +173,7 @@ type ObjectResult struct {
 }
 
 func (res *ObjectResult) TypeName() []byte {
-	return TypeToBytes(res.Type)
+	return git.TypeToBytes(res.Type)
 }
 
 type ResolvedObject struct {
@@ -244,5 +246,29 @@ func (s *ObjectStats) PrintSummary() {
 	for _, d := range depths {
 		count := s.ChainCounts[d]
 		fmt.Printf("chain length = %d: %d objects\n", d, count)
+	}
+}
+
+func printResult(res *ObjectResult) {
+	if res.Depth > 0 {
+		// Format: SHA1 TYPE SIZE PACKSIZE OFFSET DEPTH PARENT_SHA1
+		fmt.Printf("%s %-7s %d %d %d %d %s\n",
+			res.SHA1,
+			git.TypeToBytes(res.Type),
+			res.Size,
+			res.PackSize,
+			res.Offset,
+			res.Depth,
+			res.ParentSHA1,
+		)
+	} else {
+		// Format: SHA1 TYPE SIZE PACKSIZE OFFSET
+		fmt.Printf("%s %-7s %d %d %d\n",
+			res.SHA1,
+			git.TypeToBytes(res.Type),
+			res.Size,
+			res.PackSize,
+			res.Offset,
+		)
 	}
 }

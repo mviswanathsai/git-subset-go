@@ -51,7 +51,7 @@ func main() {
 
 	case "cat-file":
 		objhash := os.Args[3]
-        objDirName, objFileName := hashes.DecomposeHash(objhash)
+		objDirName, objFileName := hashes.DecomposeHash(objhash)
 
 		// we first need to open the file
 		filePath := fp.Join(git.GitObjDir, objDirName, objFileName)
@@ -484,56 +484,5 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
-	}
-}
-
-type checkoutResult struct {
-	indexEntries []*IndexEntry
-}
-
-func returnCommitTreeSHA(commitData []byte) string {
-	return string(commitData[5:45])
-}
-
-func printResult(res *ObjectResult) {
-	if res.Depth > 0 {
-		// Format: SHA1 TYPE SIZE PACKSIZE OFFSET DEPTH PARENT_SHA1
-		fmt.Printf("%s %-7s %d %d %d %d %s\n",
-			res.SHA1,
-			TypeToBytes(res.Type),
-			res.Size,
-			res.PackSize,
-			res.Offset,
-			res.Depth,
-			res.ParentSHA1,
-		)
-	} else {
-		// Format: SHA1 TYPE SIZE PACKSIZE OFFSET
-		fmt.Printf("%s %-7s %d %d %d\n",
-			res.SHA1,
-			TypeToBytes(res.Type),
-			res.Size,
-			res.PackSize,
-			res.Offset,
-		)
-	}
-}
-
-func TypeToBytes(input uint8) []byte {
-	switch input {
-	case git.OBJ_COMMIT:
-		return git.GIT_COMMIT
-	case git.OBJ_TREE:
-		return git.GIT_TREE
-	case git.OBJ_BLOB:
-		return git.GIT_BLOB
-	case git.OBJ_TAG:
-		return git.GIT_TAG
-	case git.OBJ_OFS_DELTA:
-		return git.GIT_OFS_DELTA
-	case git.OBJ_REF_DELTA:
-		return git.GIT_REF_DELTA
-	default:
-		return nil
 	}
 }
