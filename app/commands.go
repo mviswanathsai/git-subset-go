@@ -96,13 +96,29 @@ func handleCatFile(args []string) error {
 
 func handleHashObject(args []string) error {
 	fs := flag.NewFlagSet("hash-object", flag.ExitOnError)
-	write := fs.Bool("w", false, "write the object to the object database")
-	if fs.NArg() < 1 {
+	write := fs.Bool("w", false, "write the object")
+
+	var positional []string
+	// Loop to handle flags interspersed with positional arguments
+	for len(args) > 0 {
+		if err := fs.Parse(args); err != nil {
+			return err
+		}
+		remaining := fs.Args()
+		if len(remaining) > 0 {
+			positional = append(positional, remaining[0])
+			args = remaining[1:] // Move past the positional arg to find more flags
+		} else {
+			args = nil
+		}
+	}
+
+	if len(positional) < 1 {
 		return fmt.Errorf("file path required")
 	}
-	filePath := fs.Arg(0)
-	fs.Parse(args)
 
+	// The file path is our positional argument
+	filePath := positional[0]
 	f, finfo, err := files.OpenFile(filePath)
 	if err != nil {
 		return fmt.Errorf("Error opening object file: %v", err)
