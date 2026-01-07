@@ -474,6 +474,7 @@ func main() {
 		checkoutResult, err := repoBuilder.CheckoutHeadCommit()
 		if err != nil {
 			fmt.Printf("Error checking out HEAD commit %s: %v\n", repoBuilder.refs["HEAD"], err)
+			os.Exit(1)
 		}
 
 		if err := repoBuilder.WriteIndex(checkoutResult.indexEntries); err != nil {

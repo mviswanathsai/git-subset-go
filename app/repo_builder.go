@@ -65,7 +65,7 @@ func (builder *RepoBuilder) CheckoutCommit(commitSHA []byte) (*checkoutResult, e
 	treeSHA := returnCommitTreeSHA(headCommit.Data)
 	treeData := builder.objectSource[treeSHA].Data
 	if err := builder.buildRepository("", treeData, result); err != nil {
-		return nil, err
+        return nil, fmt.Errorf("Error building repository: %w", err)
 	}
 	return result, nil
 }
@@ -110,6 +110,7 @@ func (builder *RepoBuilder) buildRepository(currentDir string, treeData []byte, 
 		} else {
 			currentDir = fp.Join(currentDir, treeEntry.name)
 			if err := os.MkdirAll(currentDir, 0755); err != nil {
+                fmt.Printf("err here")
 				return err
 			}
 			treeData := builder.objectSource[treeEntry.sha1].Data
