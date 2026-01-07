@@ -1,5 +1,5 @@
 package hashes
-
+// This pkg needn't exist. I am keeping it because I don't wanna rename multiple lines of code.
 import (
 	"compress/zlib"
 	"crypto/sha1"
@@ -14,7 +14,7 @@ import (
 	git "github.com/codecrafters-io/git-starter-go/internal/git"
 )
 
-func HashObject(f io.Reader, size int64, objType string, write bool) string {
+func HashAndWriteObject(f io.Reader, size int64, objType string, write bool) (string, error) {
 	var tmpw io.Writer
 	if write {
 		tmpf := files.CreateTempObjFile()
@@ -27,21 +27,24 @@ func HashObject(f io.Reader, size int64, objType string, write bool) string {
 	hash := sha1.New()
 	zw := zlib.NewWriter(tmpw)
 	mw := io.MultiWriter(hash, zw)
-	files.WriteGitObject(mw, objType, int(size), f)
+	if err := files.WriteGitObject(mw, objType, int(size), f); err != nil {
+		return "", fmt.Errorf("Error writing object to disk")
+	}
 
 	h := fmt.Sprintf("%x", hash.Sum(nil))
 	zw.Close()
 
 	if !write {
-		return h
+		return h, nil
 	}
 
 	tmpf, ok := tmpw.(*os.File)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "Fatal: tmpw is of unexpected type %T", tmpw)
-		os.Exit(1)
+		return "", fmt.Errorf("Fatal: tmpw is of unexpected type %T\n", tmpw)
 	}
-	tmpf.Close()
+	if err := tmpf.Close(); err != nil {
+		return "", err
+	}
 
 	objDirName, objFileName := DecomposeHash(h)
 	err := os.MkdirAll(fp.Join(git.GitObjDir, objDirName), 0775)
@@ -51,11 +54,12 @@ func HashObject(f io.Reader, size int64, objType string, write bool) string {
 	}
 
 	objFilePath := fp.Join(git.GitObjDir, objDirName, objFileName)
-	os.Rename(tmpf.Name(), objFilePath)
-	return h
+    if err := os.Rename(tmpf.Name(), objFilePath); err != nil {
+        return "", fmt.Errorf("Error creating object file: %w\n", err)
+    }
+	return h, nil
 }
 
 func DecomposeHash(hash string) (dirName, fileName string) {
 	return hash[:2], hash[2:]
 }
-

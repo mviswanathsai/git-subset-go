@@ -1,5 +1,5 @@
 package files
-
+// This pkg needn't exist. I am keeping it because I don't wanna rename multiple lines of code.
 import (
 	"fmt"
 	git "github.com/codecrafters-io/git-starter-go/internal/git"
@@ -38,5 +38,5 @@ func WriteGitObject(writer io.Writer, objType string, payloadSize int, payload i
 	if _, err := io.Copy(writer, payload); err != nil {
 		return err
 	}
-    return nil
+	return nil
 }

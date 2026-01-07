@@ -100,7 +100,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		h := hashes.HashObject(f, finfo.Size(), "blob", write)
+		h := hashes.HashAndWriteObject(f, finfo.Size(), "blob", write)
 
 		// Print the hex encoding of the hash.
 		fmt.Print(h)
