@@ -244,7 +244,11 @@ func handleCommitTree(args []string) error {
 	fmt.Fprintf(buf, "author %s <%s> %d %s\n", author, email, timestamp, offset)
 	fmt.Fprintf(buf, "\n%s\n", *message)
 
-	tmpf := files.CreateTempObjFile()
+	tmpf, err := files.CreateTempObjFile()
+    if err != nil {
+        return err
+    }
+
 	hash := sha1.New()
 	zw := zlib.NewWriter(tmpf)
 	mw := io.MultiWriter(hash, zw)

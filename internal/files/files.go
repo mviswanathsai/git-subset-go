@@ -1,4 +1,5 @@
 package files
+
 // This pkg needn't exist. I am keeping it because I don't wanna rename multiple lines of code.
 import (
 	"fmt"
@@ -7,13 +8,12 @@ import (
 	"os"
 )
 
-func CreateTempObjFile() *os.File {
+func CreateTempObjFile() (*os.File, error) {
 	tmpf, err := os.CreateTemp(git.GitObjDir, "tmp_obj_")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating temp file: %v\n", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("Error creating temp file: %v\n", err)
 	}
-	return tmpf
+	return tmpf, nil
 }
 
 func OpenFile(filename string) (*os.File, os.FileInfo, error) {

@@ -17,7 +17,10 @@ import (
 func HashAndWriteObject(f io.Reader, size int64, objType string, write bool) (string, error) {
 	var tmpw io.Writer
 	if write {
-		tmpf := files.CreateTempObjFile()
+		tmpf, err := files.CreateTempObjFile()
+        if err != nil {
+            return "", err
+        }
 		defer os.Remove(tmpf.Name())
 		tmpw = tmpf
 	} else {
