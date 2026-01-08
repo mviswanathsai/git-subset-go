@@ -34,7 +34,7 @@ var commands = map[string]Command{
 	"hash-object": {Name: "hash-object", Run: handleHashObject},
 	"write-tree":  {Name: "write-tree", Run: handleWriteTree},
 	"commit-tree": {Name: "commit-tree", Run: handleCommitTree},
-	"verify-tree": {Name: "verify-tree", Run: handleVerifyTree},
+	"verify-pack": {Name: "verify-pack", Run: handleVerifyPack},
 	"ls-tree":     {Name: "ls-tree", Run: handleLsTree},
 	"ls-remote":   {Name: "ls-remote", Run: handleLsRemote},
 	"clone":       {Name: "clone", Run: handleClone},
@@ -315,7 +315,7 @@ func handleCommitTree(args []string) error {
 	return nil
 }
 
-func handleVerifyTree(args []string) error {
+func handleVerifyPack(args []string) error {
 	fs := flag.NewFlagSet("verify-pack", flag.ExitOnError)
 	fs.Parse(args)
 
@@ -335,11 +335,12 @@ func handleVerifyTree(args []string) error {
 	br := bufio.NewReader(pf)
 
 	streamer := &PackStreamer{
-		f:   pf,
-		br:  br,
-		h:   h,
-		zr:  nil,
-		zbr: nil,
+		f:     pf,
+		br:    br,
+		h:     h,
+		fInfo: fileInfo,
+		zr:    nil,
+		zbr:   nil,
 	}
 
 	if _, err := streamer.VerifyPackTrailer(); err != nil {
@@ -360,6 +361,7 @@ func handleVerifyTree(args []string) error {
 		file:        pf,
 		fileInfo:    fileInfo,
 		h:           h,
+		lp:          NewLeveledPool(),
 	}
 
 	stats := &ObjectStats{
@@ -427,6 +429,11 @@ func handleClone(args []string) error {
 	flagset := flag.NewFlagSet("clone", flag.ExitOnError)
 	flagset.Parse(args)
 
+	startDir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
 	// Validate positional arguments
 	if flagset.NArg() < 2 {
 		return fmt.Errorf("usage: clone <url> <working-directory>")
@@ -435,8 +442,7 @@ func handleClone(args []string) error {
 	url := flagset.Arg(0)
 	workingDir := flagset.Arg(1)
 
-	err := os.MkdirAll(fp.Join(workingDir, git.GitObjDir), 0775)
-	if err != nil {
+	if err = os.MkdirAll(fp.Join(workingDir, git.GitObjDir), 0775); err != nil {
 		return fmt.Errorf("Error creating repo dir: %v\n", err)
 	}
 
@@ -508,6 +514,7 @@ func handleClone(args []string) error {
 		fileInfo:    fileInfo,
 		zr:          streamer.zr,
 		h:           sha1.New(),
+		lp:          NewLeveledPool(),
 	}
 
 	storer := NewObjectStorer()
@@ -542,5 +549,8 @@ func handleClone(args []string) error {
 	if err := repoBuilder.WriteIndex(checkoutResult.indexEntries); err != nil {
 		return fmt.Errorf("Error writing index: %v\n", err)
 	}
+
+	os.Chdir(startDir)
+
 	return nil
 }

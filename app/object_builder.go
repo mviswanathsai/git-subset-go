@@ -25,9 +25,9 @@ type ObjectBuilder struct {
 	br          *bufio.Reader
 	zr          io.ReadCloser
 	h           hash.Hash
+	lp          *LeveledPool
 }
 
-// TODO: add verification. This can only be run when some info about the pack is already known.
 func (builder *ObjectBuilder) ForEachObject(fn func(res *ResolvedObject) error) error {
 	for _, offset := range builder.packOrder {
 		node := builder.packIndex[offset]
@@ -84,7 +84,11 @@ func (builder *ObjectBuilder) resolveDelta(n *DeltaNode) *ResolvedObject {
 	parentResolvedObject := builder.buildObject(builder.Index()[n.ParentOffset()])
 	depth := parentResolvedObject.Depth + 1
 	baseType := parentResolvedObject.Type
-	data := applyDelta(n, parentResolvedObject.Data)
+	dstBuf := builder.lp.Get(int(n.dstBufSize))
+	defer builder.lp.Put(dstBuf)
+	applyDeltaInto(n, parentResolvedObject.Data, *dstBuf)
+	data := make([]byte, n.dstBufSize)
+	copy(data, *dstBuf)
 	hash := builder.ReturnObjectSHA(data, int64(len(data)), baseType)
 	res := &ResolvedObject{
 		SHA1:       hash,
@@ -113,7 +117,11 @@ func (builder *ObjectBuilder) ReturnObjectSHA(data []byte, size int64, objType u
 }
 
 func (builder *ObjectBuilder) resolveBase(n *ObjectNode) *ResolvedObject {
-	data := builder.readObjectData(n)
+	buf := builder.lp.Get(int(n.objSize))
+	defer builder.lp.Put(buf)
+	builder.readObjectDataInto(n, *buf)
+	data := make([]byte, n.objSize)
+	copy(data, *buf)
 	hash := builder.ReturnObjectSHA(data, int64(n.objSize), n.objType)
 	objType := n.Type()
 	depth := 0
@@ -145,7 +153,7 @@ func (builder *ObjectBuilder) buildObject(n PackNode) *ResolvedObject {
 	return res
 }
 
-func (builder *ObjectBuilder) readObjectData(n *ObjectNode) []byte {
+func (builder *ObjectBuilder) readObjectDataInto(n *ObjectNode, buf []byte) {
 	f := builder.file
 	br := builder.br
 	f.Seek(int64(n.dataOffset), 0)
@@ -157,9 +165,7 @@ func (builder *ObjectBuilder) readObjectData(n *ObjectNode) []byte {
 			reseter.Reset(builder.br, nil)
 		}
 	}
-	buf := make([]byte, n.ObjectSize())
 	io.ReadFull(builder.zr, buf)
-	return buf
 }
 
 type ObjectResult struct {
@@ -182,6 +188,35 @@ type ResolvedObject struct {
 	Depth      int
 	ParentSHA1 string
 	Data       []byte
+}
+
+func applyDeltaInto(d *DeltaNode, srcBuf []byte, dstBuf []byte) {
+	if len(srcBuf) != int(d.srcBufSize) {
+		fmt.Fprintf(os.Stderr, "Unexepected src buffer size")
+		os.Exit(1)
+	}
+	var cursor uint64
+	for _, op := range d.ops {
+		if op.kind() == 1 {
+			copyOp, ok := op.(CopyOp)
+			if !ok {
+				fmt.Fprintf(os.Stderr, "Something is very wrong")
+				os.Exit(1)
+			}
+			// Copy from the given offset into the dst buffer
+			copy(dstBuf[cursor:], srcBuf[copyOp.Offset:copyOp.Offset+copyOp.Size])
+			cursor += copyOp.Size
+		} else {
+			insertOp, ok := op.(InsertOp)
+			if !ok {
+				fmt.Fprintf(os.Stderr, "Something is very wrong")
+				os.Exit(1)
+			}
+			copy(dstBuf[cursor:], insertOp.Payload)
+			cursor += uint64(len(insertOp.Payload))
+		}
+
+	}
 }
 
 func applyDelta(d *DeltaNode, srcBuf []byte) []byte {
@@ -251,8 +286,8 @@ func (s *ObjectStats) PrintSummary() {
 
 func printResult(res *ObjectResult) {
 	if res.Depth > 0 {
-		// Format: SHA1 TYPE SIZE PACKSIZE OFFSET DEPTH PARENT_SHA1
-		fmt.Printf("%s %-7s %d %d %d %d %s\n",
+		// Format for deltas: SHA1 TYPE SIZE PACKSIZE OFFSET DEPTH PARENT_SHA1
+		fmt.Printf("%-10s %-7s %7d %7d %7d %d %s\n",
 			res.SHA1,
 			git.TypeToBytes(res.Type),
 			res.Size,
@@ -262,8 +297,8 @@ func printResult(res *ObjectResult) {
 			res.ParentSHA1,
 		)
 	} else {
-		// Format: SHA1 TYPE SIZE PACKSIZE OFFSET
-		fmt.Printf("%s %-7s %d %d %d\n",
+		// Format for non-deltas: SHA1 TYPE SIZE PACKSIZE OFFSET
+		fmt.Printf("%-10s %-7s %7d %7d %7d\n",
 			res.SHA1,
 			git.TypeToBytes(res.Type),
 			res.Size,
