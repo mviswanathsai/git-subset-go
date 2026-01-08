@@ -1,0 +1,3129 @@
+<!DOCTYPE html>
+<html><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <meta charset="utf-8">
+  <title>app alloc_space</title>
+  <style type="text/css">
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+html, body {
+  height: 100%;
+}
+body {
+  font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+  font-size: 13px;
+  line-height: 1.4;
+  display: flex;
+  flex-direction: column;
+}
+a {
+  color: #2a66d9;
+}
+.header {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  min-height: 44px;
+  background-color: #eee;
+  color: #212121;
+  padding: 0 1rem;
+}
+.header > div {
+  margin: 0 0.125em;
+}
+.header .title h1 {
+  font-size: 1.75em;
+  margin-right: 1rem;
+  margin-bottom: 4px;
+}
+.header .title a {
+  color: #212121;
+  text-decoration: none;
+}
+.header .title a:hover {
+  text-decoration: underline;
+}
+.header .description {
+  width: 100%;
+  text-align: right;
+  white-space: nowrap;
+}
+@media screen and (max-width: 799px) {
+  .header input {
+    display: none;
+  }
+}
+#detailsbox {
+  display: none;
+  position: fixed;
+  top: 40px;
+  right: 20px;
+  background-color: #ffffff;
+  box-shadow: 0 1px 5px rgba(0,0,0,.3);
+  line-height: 24px;
+  padding: 1em;
+  text-align: left;
+}
+.header input {
+  background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' style='pointer-events:none;display:block;width:100%25;height:100%25;fill:%23757575'%3E%3Cpath d='M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61.0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/%3E%3C/svg%3E") no-repeat 4px center/20px 20px;
+  border: 1px solid #d1d2d3;
+  border-radius: 2px 0 0 2px;
+  padding: 0.25em;
+  padding-left: 28px;
+  margin-left: 1em;
+  font-family: 'Roboto', 'Noto', sans-serif;
+  font-size: 1em;
+  line-height: 24px;
+  color: #212121;
+}
+.downArrow {
+  border-top: .36em solid #ccc;
+  border-left: .36em solid transparent;
+  border-right: .36em solid transparent;
+  margin-bottom: .05em;
+  margin-left: .5em;
+  transition: border-top-color 200ms;
+}
+.menu-item {
+  height: 100%;
+  text-transform: uppercase;
+  font-family: 'Roboto Medium', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+  position: relative;
+}
+.menu-item .menu-name:hover {
+  opacity: 0.75;
+}
+.menu-item .menu-name:hover .downArrow {
+  border-top-color: #666;
+}
+.menu-name {
+  height: 100%;
+  padding: 0 0.5em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.menu-name a {
+  text-decoration: none;
+  color: #212121;
+}
+.submenu {
+  display: none;
+  margin-top: -4px;
+  min-width: 10em;
+  position: absolute;
+  left: 0px;
+  background-color: white;
+  box-shadow: 0 1px 5px rgba(0,0,0,.3);
+  font-size: 100%;
+  text-transform: none;
+  white-space: nowrap;
+}
+.menu-item, .submenu {
+  user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  -webkit-user-select: none;
+}
+.submenu hr {
+  border: 0;
+  border-top: 2px solid #eee;
+}
+.submenu a {
+  display: block;
+  padding: .5em 1em;
+  text-decoration: none;
+}
+.submenu a:hover, .submenu a.active {
+  color: white;
+  background-color: #6b82d6;
+}
+.submenu a.disabled {
+  color: gray;
+  pointer-events: none;
+}
+.menu-check-mark {
+  position: absolute;
+  left: 2px;
+}
+.menu-delete-btn {
+  position: absolute;
+  right: 2px;
+}
+
+.help {
+  padding-left: 1em;
+}
+
+
+#dialog-overlay {
+  display: none;
+  position: fixed;
+  left: 0px;
+  top: 0px;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(1,1,1,0.1);
+}
+
+.dialog {
+  
+  display: none;
+  position: fixed;
+  margin: 0px;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 125%;
+  background-color: #ffffff;
+  box-shadow: 0 1px 5px rgba(0,0,0,.3);
+}
+.dialog-header {
+  font-size: 120%;
+  border-bottom: 1px solid #CCCCCC;
+  width: 100%;
+  text-align: center;
+  background: #EEEEEE;
+  user-select: none;
+}
+.dialog-footer {
+  border-top: 1px solid #CCCCCC;
+  width: 100%;
+  text-align: right;
+  padding: 10px;
+}
+.dialog-error {
+  margin: 10px;
+  color: red;
+}
+.dialog input {
+  margin: 10px;
+  font-size: inherit;
+}
+.dialog button {
+  margin-left: 10px;
+  font-size: inherit;
+}
+#save-dialog, #delete-dialog {
+  width: 50%;
+  max-width: 20em;
+}
+#delete-prompt {
+  padding: 10px;
+}
+
+#content {
+  overflow-y: scroll;
+  padding: 1em;
+}
+#top {
+  overflow-y: scroll;
+}
+#graph {
+  overflow: hidden;
+}
+#graph svg {
+  width: 100%;
+  height: auto;
+  padding: 10px;
+}
+#content.source .filename {
+  margin-top: 0;
+  margin-bottom: 1em;
+  font-size: 120%;
+}
+#content.source pre {
+  margin-bottom: 3em;
+}
+table {
+  border-spacing: 0px;
+  width: 100%;
+  padding-bottom: 1em;
+  white-space: nowrap;
+}
+table thead {
+  font-family: 'Roboto Medium', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+}
+table tr th {
+  position: sticky;
+  top: 0;
+  background-color: #ddd;
+  text-align: right;
+  padding: .3em .5em;
+}
+table tr td {
+  padding: .3em .5em;
+  text-align: right;
+}
+#top table tr th:nth-child(6),
+#top table tr th:nth-child(7),
+#top table tr td:nth-child(6),
+#top table tr td:nth-child(7) {
+  text-align: left;
+}
+#top table tr td:nth-child(6) {
+  width: 100%;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+#flathdr1, #flathdr2, #cumhdr1, #cumhdr2, #namehdr {
+  cursor: ns-resize;
+}
+.hilite {
+  background-color: #ebf5fb;
+  font-weight: bold;
+}
+ 
+.boxtext         { z-index: 2; }   
+#current-details { z-index: 2; }   
+#detailsbox      { z-index: 3; }   
+.submenu         { z-index: 4; }
+.dialog          { z-index: 5; }
+</style>
+
+  <style type="text/css">
+#graph {
+    cursor: grab;
+}
+
+#graph:active {
+    cursor: grabbing;
+}
+</style>
+
+</head>
+<body>
+  <div class="header">
+  <div class="title">
+    <h1><a href="http://localhost:8080/ui/">pprof</a></h1>
+  </div>
+
+  <div id="view" class="menu-item">
+    <div class="menu-name">
+      View
+      <i class="downArrow"></i>
+    </div>
+    <div class="submenu">
+      <a title="Outputs top entries in text form" href="http://localhost:8080/ui/top" id="topbtn">Top</a>
+      <a title="Display profile as a directed graph" href="http://localhost:8080/ui/" id="graphbtn">Graph</a>
+      <a title="Display profile as a flame graph" href="http://localhost:8080/ui/flamegraph" id="flamegraph">Flame Graph</a>
+      <a title="Output callers/callees of functions matching regexp" href="http://localhost:8080/ui/peek" id="peek">Peek</a>
+      <a title="Output annotated source for functions matching regexp" href="http://localhost:8080/ui/source" id="list">Source</a>
+      <a title="Output assembly listings annotated with samples" href="http://localhost:8080/ui/disasm" id="disasm">Disassemble</a>
+    </div>
+  </div>
+
+  
+  
+  <div id="sample" class="menu-item">
+    <div class="menu-name">
+      Sample
+      <i class="downArrow"></i>
+    </div>
+    <div class="submenu">
+      
+      <a href="http://localhost:8080/ui/?si=alloc_objects" id="sampletype-alloc_objects">alloc_objects</a>
+      
+      <a href="http://localhost:8080/ui/?si=alloc_space" id="sampletype-alloc_space">alloc_space</a>
+      
+      <a href="http://localhost:8080/ui/?si=inuse_objects" id="sampletype-inuse_objects">inuse_objects</a>
+      
+      <a href="http://localhost:8080/ui/?si=inuse_space" id="sampletype-inuse_space">inuse_space</a>
+      
+    </div>
+  </div>
+  
+
+  <div id="refine" class="menu-item">
+    <div class="menu-name">
+      Refine
+      <i class="downArrow"></i>
+    </div>
+    <div class="submenu">
+      <a title="Restricts to samples going through a node matching regexp
+Discard samples that do not include a node matching this regexp.
+Matching includes the function name, filename or object name.
+" href="http://localhost:8080/ui/?" id="focus" class="disabled">Focus</a>
+      <a title="Skips paths going through any nodes matching regexp
+If set, discard samples that include a node matching this regexp.
+Matching includes the function name, filename or object name.
+" href="http://localhost:8080/ui/?" id="ignore" class="disabled">Ignore</a>
+      <a title="Skips nodes matching regexp
+Discard nodes that match this location.
+Other nodes from samples that include this location will be shown.
+Matching includes the function name, filename or object name.
+" href="http://localhost:8080/ui/?" id="hide" class="disabled">Hide</a>
+      <a title="Only show nodes matching regexp
+If set, only show nodes that match this location.
+Matching includes the function name, filename or object name.
+" href="http://localhost:8080/ui/?" id="show" class="disabled">Show</a>
+      <a title="Drops functions above the highest matched frame.
+If set, all frames above the highest match are dropped from every sample.
+Matching includes the function name, filename or object name.
+" href="http://localhost:8080/ui/?" id="show-from" class="disabled">Show from</a>
+      <hr>
+      <a title="Show the entire profile" href="http://localhost:8080/ui/?">Reset</a>
+    </div>
+  </div>
+
+  <div id="config" class="menu-item">
+    <div class="menu-name">
+      Config
+      <i class="downArrow"></i>
+    </div>
+    <div class="submenu">
+      <a title="Save current settings" id="save-config">Save as ...</a>
+      <hr>
+      
+      <a href="http://localhost:8080/ui/?si=alloc_space">
+        <span class="menu-check-mark">✓</span>
+        Default
+        
+      </a>
+      
+    </div>
+  </div>
+
+  <div id="download" class="menu-item">
+    <div class="menu-name">
+      <a href="http://localhost:8080/ui/download">Download</a>
+    </div>
+  </div>
+
+  <div>
+    <input id="search" type="text" placeholder="Search regexp" autocomplete="off" autocapitalize="none" size="40">
+  </div>
+
+  <div class="description">
+    <a title="Show information about the profile and this view" href="#" id="details">app alloc_space</a>
+    <div id="detailsbox">
+      <div>File: app</div><div>Build ID: 9e4723b5017a3fabed5b79979d99fd7ef1cfab13</div><div>Type: alloc_space</div><div>Time: 2026-01-08 14:09:28 IST</div><div>Showing nodes accounting for 10238.48kB, 100% of 10238.48kB total</div><div>Showing top 64 nodes out of 89</div><div>
+See https://git.io/JfYMW for how to read the graph</div>
+    </div>
+  </div>
+
+  
+</div>
+
+<div id="dialog-overlay"></div>
+
+<div class="dialog" id="save-dialog">
+  <div class="dialog-header">Save options as</div>
+  <datalist id="config-list">
+    
+  </datalist>
+  <input id="save-name" type="text" list="config-list" placeholder="New config">
+  <div class="dialog-footer">
+    <span class="dialog-error" id="save-error"></span>
+    <button id="save-cancel">Cancel</button>
+    <button id="save-confirm">Save</button>
+  </div>
+</div>
+
+<div class="dialog" id="delete-dialog">
+  <div class="dialog-header" id="delete-dialog-title">Delete config</div>
+  <div id="delete-prompt"></div>
+  <div class="dialog-footer">
+    <span class="dialog-error" id="delete-error"></span>
+    <button id="delete-cancel">Cancel</button>
+    <button id="delete-confirm">Delete</button>
+  </div>
+</div>
+
+<div id="errors"></div>
+
+  <div id="graph">
+    <svg width="1694pt" height="2588pt" viewBox="-844.024 154.409 4393.8 6712.61" xmlns="http://www.w3.org/2000/svg" xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 2584)">
+<title>app</title>
+<polygon fill="white" stroke="transparent" points="-4,4 -4,-2584 1690,-2584 1690,4 -4,4"></polygon>
+<!-- N1 -->
+<g id="node1" class="node">
+<title>N1</title>
+<g id="a_node1"><a xlink:title="crypto/x509.parseCertificate (2048.16kB)">
+<polygon fill="#edded5" stroke="#b24400" points="370,-706 144,-706 144,-618 370,-618 370,-706"></polygon>
+<text text-anchor="middle" x="257" y="-687.6" font-family="Times,serif" font-size="18.00">x509</text>
+<text text-anchor="middle" x="257" y="-667.6" font-family="Times,serif" font-size="18.00">parseCertificate</text>
+<text text-anchor="middle" x="257" y="-647.6" font-family="Times,serif" font-size="18.00">512.05kB (5.00%)</text>
+<text text-anchor="middle" x="257" y="-627.6" font-family="Times,serif" font-size="18.00">of 2048.16kB (20.00%)</text>
+</a>
+</g>
+</g>
+<!-- NN1_0 -->
+<g id="NN1_0" class="node">
+<title>NN1_0</title>
+<g id="a_NN1_0"><a xlink:title="512.05kB">
+<polygon fill="#f8f8f8" stroke="black" points="284,-567 234,-567 230,-563 230,-531 280,-531 284,-535 284,-567"></polygon>
+<polyline fill="none" stroke="black" points="280,-563 230,-563 "></polyline>
+<polyline fill="none" stroke="black" points="280,-563 280,-531 "></polyline>
+<polyline fill="none" stroke="black" points="280,-563 284,-567 "></polyline>
+<text text-anchor="middle" x="257" y="-547.1" font-family="Times,serif" font-size="8.00">112B</text>
+</a>
+</g>
+</g>
+<!-- N1&#45;&gt;NN1_0 -->
+<g id="edge1" class="edge">
+<title>N1-&gt;NN1_0</title>
+<g id="a_edge1"><a xlink:title="512.05kB">
+<path fill="none" stroke="black" d="M257,-617.77C257,-604.25 257,-589.71 257,-577.58"></path>
+<polygon fill="black" stroke="black" points="260.5,-577.22 257,-567.22 253.5,-577.22 260.5,-577.22"></polygon>
+</a>
+</g>
+<g id="a_edge1-label"><a xlink:title="512.05kB">
+<text text-anchor="middle" x="293.5" y="-588.8" font-family="Times,serif" font-size="14.00"> 512.05kB</text>
+</a>
+</g>
+</g>
+<!-- N23 -->
+<g id="node23" class="node">
+<title>N23</title>
+<g id="a_node23"><a xlink:title="crypto/x509.parseName (512.05kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="322,-484 142,-484 142,-416 322,-416 322,-484"></polygon>
+<text text-anchor="middle" x="232" y="-465.6" font-family="Times,serif" font-size="18.00">x509</text>
+<text text-anchor="middle" x="232" y="-445.6" font-family="Times,serif" font-size="18.00">parseName</text>
+<text text-anchor="middle" x="232" y="-425.6" font-family="Times,serif" font-size="18.00">512.05kB (5.00%)</text>
+</a>
+</g>
+</g>
+<!-- N1&#45;&gt;N23 -->
+<g id="edge68" class="edge">
+<title>N1-&gt;N23</title>
+<g id="a_edge68"><a xlink:title="crypto/x509.parseCertificate -&gt; crypto/x509.parseName (512.05kB)">
+<path fill="none" stroke="#b2a085" d="M323.91,-617.98C331.23,-608.22 334.84,-597.11 331,-585 319.85,-549.79 295.2,-516.37 273.28,-491.71"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="275.6,-489.06 266.28,-484.02 270.43,-493.77 275.6,-489.06"></polygon>
+</a>
+</g>
+<g id="a_edge68-label"><a xlink:title="crypto/x509.parseCertificate -&gt; crypto/x509.parseName (512.05kB)">
+<text text-anchor="middle" x="360.5" y="-545.3" font-family="Times,serif" font-size="14.00"> 512.05kB</text>
+</a>
+</g>
+</g>
+<!-- N25 -->
+<g id="node25" class="node">
+<title>N25</title>
+<g id="a_node25"><a xlink:title="crypto/x509/pkix.(*Name).FillFromRDNSequence (512.04kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="567.5,-494 340.5,-494 340.5,-406 567.5,-406 567.5,-494"></polygon>
+<text text-anchor="middle" x="454" y="-475.6" font-family="Times,serif" font-size="18.00">pkix</text>
+<text text-anchor="middle" x="454" y="-455.6" font-family="Times,serif" font-size="18.00">(*Name)</text>
+<text text-anchor="middle" x="454" y="-435.6" font-family="Times,serif" font-size="18.00">FillFromRDNSequence</text>
+<text text-anchor="middle" x="454" y="-415.6" font-family="Times,serif" font-size="18.00">512.04kB (5.00%)</text>
+</a>
+</g>
+</g>
+<!-- N1&#45;&gt;N25 -->
+<g id="edge70" class="edge">
+<title>N1-&gt;N25</title>
+<g id="a_edge70"><a xlink:title="crypto/x509.parseCertificate -&gt; crypto/x509/pkix.(*Name).FillFromRDNSequence (512.04kB)">
+<path fill="none" stroke="#b2a085" d="M340.26,-617.93C362,-603.85 384.06,-586.69 401,-567 416.72,-548.73 428.65,-525.03 437.17,-503.82"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="440.52,-504.87 440.85,-494.28 433.99,-502.35 440.52,-504.87"></polygon>
+</a>
+</g>
+<g id="a_edge70-label"><a xlink:title="crypto/x509.parseCertificate -&gt; crypto/x509/pkix.(*Name).FillFromRDNSequence (512.04kB)">
+<text text-anchor="middle" x="461.5" y="-545.3" font-family="Times,serif" font-size="14.00"> 512.04kB</text>
+</a>
+</g>
+</g>
+<!-- N47 -->
+<g id="node47" class="node">
+<title>N47</title>
+<g id="a_node47"><a xlink:title="crypto/x509.parsePublicKey (512.02kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="692.5,-468 585.5,-468 585.5,-432 692.5,-432 692.5,-468"></polygon>
+<text text-anchor="middle" x="639" y="-457.1" font-family="Times,serif" font-size="8.00">x509</text>
+<text text-anchor="middle" x="639" y="-448.1" font-family="Times,serif" font-size="8.00">parsePublicKey</text>
+<text text-anchor="middle" x="639" y="-439.1" font-family="Times,serif" font-size="8.00">0 of 512.02kB (5.00%)</text>
+</a>
+</g>
+</g>
+<!-- N1&#45;&gt;N47 -->
+<g id="edge75" class="edge">
+<title>N1-&gt;N47</title>
+<g id="a_edge75"><a xlink:title="crypto/x509.parseCertificate -&gt; crypto/x509.parsePublicKey (512.02kB)">
+<path fill="none" stroke="#b2a085" d="M370.08,-621.74C422.48,-602.72 478.33,-581.01 502,-567 545.94,-540.99 589.75,-500.77 615.6,-475.17"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="618.12,-477.59 622.71,-468.05 613.17,-472.65 618.12,-477.59"></polygon>
+</a>
+</g>
+<g id="a_edge75-label"><a xlink:title="crypto/x509.parseCertificate -&gt; crypto/x509.parsePublicKey (512.02kB)">
+<text text-anchor="middle" x="588.5" y="-545.3" font-family="Times,serif" font-size="14.00"> 512.02kB</text>
+</a>
+</g>
+</g>
+<!-- N2 -->
+<g id="node2" class="node">
+<title>N2</title>
+<g id="a_node2"><a xlink:title="main.handleClone (4025.17kB)">
+<polygon fill="#eddbd5" stroke="#b22b00" points="1000.5,-2332 883.5,-2332 883.5,-2296 1000.5,-2296 1000.5,-2332"></polygon>
+<text text-anchor="middle" x="942" y="-2321.1" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="942" y="-2312.1" font-family="Times,serif" font-size="8.00">handleClone</text>
+<text text-anchor="middle" x="942" y="-2303.1" font-family="Times,serif" font-size="8.00">0 of 4025.17kB (39.31%)</text>
+</a>
+</g>
+</g>
+<!-- N7 -->
+<g id="node7" class="node">
+<title>N7</title>
+<g id="a_node7"><a xlink:title="main.(*ObjectBuilder).ForEachObject (2997.15kB)">
+<polygon fill="#eddcd5" stroke="#b23700" points="1000.5,-2208 883.5,-2208 883.5,-2164 1000.5,-2164 1000.5,-2208"></polygon>
+<text text-anchor="middle" x="942" y="-2197.6" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="942" y="-2188.6" font-family="Times,serif" font-size="8.00">(*ObjectBuilder)</text>
+<text text-anchor="middle" x="942" y="-2179.6" font-family="Times,serif" font-size="8.00">ForEachObject</text>
+<text text-anchor="middle" x="942" y="-2170.6" font-family="Times,serif" font-size="8.00">0 of 2997.15kB (29.27%)</text>
+</a>
+</g>
+</g>
+<!-- N2&#45;&gt;N7 -->
+<g id="edge31" class="edge">
+<title>N2-&gt;N7</title>
+<g id="a_edge31"><a xlink:title="main.handleClone -&gt; main.(*ObjectBuilder).ForEachObject (2997.15kB)">
+<path fill="none" stroke="#b23700" stroke-width="2" d="M942,-2295.74C942,-2275.9 942,-2242.92 942,-2218.47"></path>
+<polygon fill="#b23700" stroke="#b23700" stroke-width="2" points="945.5,-2218.25 942,-2208.25 938.5,-2218.25 945.5,-2218.25"></polygon>
+</a>
+</g>
+<g id="a_edge31-label"><a xlink:title="main.handleClone -&gt; main.(*ObjectBuilder).ForEachObject (2997.15kB)">
+<text text-anchor="middle" x="983" y="-2241.8" font-family="Times,serif" font-size="14.00"> 2997.15kB</text>
+</a>
+</g>
+</g>
+<!-- N54 -->
+<g id="node54" class="node">
+<title>N54</title>
+<g id="a_node54"><a xlink:title="main.(*RepoBuilder).CreateRefs (512.01kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="1134.5,-2208 1027.5,-2208 1027.5,-2164 1134.5,-2164 1134.5,-2208"></polygon>
+<text text-anchor="middle" x="1081" y="-2197.6" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="1081" y="-2188.6" font-family="Times,serif" font-size="8.00">(*RepoBuilder)</text>
+<text text-anchor="middle" x="1081" y="-2179.6" font-family="Times,serif" font-size="8.00">CreateRefs</text>
+<text text-anchor="middle" x="1081" y="-2170.6" font-family="Times,serif" font-size="8.00">0 of 512.01kB (5.00%)</text>
+</a>
+</g>
+</g>
+<!-- N2&#45;&gt;N54 -->
+<g id="edge78" class="edge">
+<title>N2-&gt;N54</title>
+<g id="a_edge78"><a xlink:title="main.handleClone -&gt; main.(*RepoBuilder).CreateRefs (512.01kB)">
+<path fill="none" stroke="#b2a085" d="M970.63,-2295.96C988.13,-2284.85 1010.44,-2269.41 1028,-2253 1039.78,-2241.99 1051.19,-2228.3 1060.39,-2216.25"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="1063.21,-2218.32 1066.39,-2208.22 1057.6,-2214.14 1063.21,-2218.32"></polygon>
+</a>
+</g>
+<g id="a_edge78-label"><a xlink:title="main.handleClone -&gt; main.(*RepoBuilder).CreateRefs (512.01kB)">
+<text text-anchor="middle" x="1079.5" y="-2241.8" font-family="Times,serif" font-size="14.00"> 512.01kB</text>
+</a>
+</g>
+</g>
+<!-- N55 -->
+<g id="node55" class="node">
+<title>N55</title>
+<g id="a_node55"><a xlink:title="main.DemuxNegotiationResponse (516.01kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="1308,-2204 1180,-2204 1180,-2168 1308,-2168 1308,-2204"></polygon>
+<text text-anchor="middle" x="1244" y="-2193.1" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="1244" y="-2184.1" font-family="Times,serif" font-size="8.00">DemuxNegotiationResponse</text>
+<text text-anchor="middle" x="1244" y="-2175.1" font-family="Times,serif" font-size="8.00">0 of 516.01kB (5.04%)</text>
+</a>
+</g>
+</g>
+<!-- N2&#45;&gt;N55 -->
+<g id="edge62" class="edge">
+<title>N2-&gt;N55</title>
+<g id="a_edge62"><a xlink:title="main.handleClone -&gt; main.DemuxNegotiationResponse (516.01kB)">
+<path fill="none" stroke="#b2a085" d="M1000.62,-2295.9C1035.78,-2285 1081.07,-2269.79 1120,-2253 1149.79,-2240.16 1182.09,-2222.84 1206.26,-2209.17"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="1208.15,-2212.12 1215.1,-2204.13 1204.68,-2206.04 1208.15,-2212.12"></polygon>
+</a>
+</g>
+<g id="a_edge62-label"><a xlink:title="main.handleClone -&gt; main.DemuxNegotiationResponse (516.01kB)">
+<text text-anchor="middle" x="1188.5" y="-2241.8" font-family="Times,serif" font-size="14.00"> 516.01kB</text>
+</a>
+</g>
+</g>
+<!-- N3 -->
+<g id="node3" class="node">
+<title>N3</title>
+<g id="a_node3"><a xlink:title="runtime.main (4025.17kB)">
+<polygon fill="#eddbd5" stroke="#b22b00" points="1000.5,-2567 883.5,-2567 883.5,-2531 1000.5,-2531 1000.5,-2567"></polygon>
+<text text-anchor="middle" x="942" y="-2556.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="942" y="-2547.1" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="942" y="-2538.1" font-family="Times,serif" font-size="8.00">0 of 4025.17kB (39.31%)</text>
+</a>
+</g>
+</g>
+<!-- N56 -->
+<g id="node56" class="node">
+<title>N56</title>
+<g id="a_node56"><a xlink:title="main.main (4025.17kB)">
+<polygon fill="#eddbd5" stroke="#b22b00" points="1000.5,-2448 883.5,-2448 883.5,-2412 1000.5,-2412 1000.5,-2448"></polygon>
+<text text-anchor="middle" x="942" y="-2437.1" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="942" y="-2428.1" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="942" y="-2419.1" font-family="Times,serif" font-size="8.00">0 of 4025.17kB (39.31%)</text>
+</a>
+</g>
+</g>
+<!-- N3&#45;&gt;N56 -->
+<g id="edge18" class="edge">
+<title>N3-&gt;N56</title>
+<g id="a_edge18"><a xlink:title="runtime.main -&gt; main.main (4025.17kB)">
+<path fill="none" stroke="#b22b00" stroke-width="2" d="M942,-2530.99C942,-2511.92 942,-2480.75 942,-2458.28"></path>
+<polygon fill="#b22b00" stroke="#b22b00" stroke-width="2" points="945.5,-2458.03 942,-2448.03 938.5,-2458.03 945.5,-2458.03"></polygon>
+</a>
+</g>
+<g id="a_edge18-label"><a xlink:title="runtime.main -&gt; main.main (4025.17kB)">
+<text text-anchor="middle" x="983" y="-2481.3" font-family="Times,serif" font-size="14.00"> 4025.17kB</text>
+</a>
+</g>
+</g>
+<!-- N4 -->
+<g id="node4" class="node">
+<title>N4</title>
+<g id="a_node4"><a xlink:title="net.open (1089.33kB)">
+<polygon fill="#ede6e0" stroke="#b28253" points="602.5,-1055 355.5,-1055 355.5,-975 602.5,-975 602.5,-1055"></polygon>
+<text text-anchor="middle" x="479" y="-1033.4" font-family="Times,serif" font-size="22.00">net</text>
+<text text-anchor="middle" x="479" y="-1009.4" font-family="Times,serif" font-size="22.00">open</text>
+<text text-anchor="middle" x="479" y="-985.4" font-family="Times,serif" font-size="22.00">1089.33kB (10.64%)</text>
+</a>
+</g>
+</g>
+<!-- NN4_0 -->
+<g id="NN4_0" class="node">
+<title>NN4_0</title>
+<g id="a_NN4_0"><a xlink:title="1089.33kB">
+<polygon fill="#f8f8f8" stroke="black" points="506,-916 456,-916 452,-912 452,-880 502,-880 506,-884 506,-916"></polygon>
+<polyline fill="none" stroke="black" points="502,-912 452,-912 "></polyline>
+<polyline fill="none" stroke="black" points="502,-912 502,-880 "></polyline>
+<polyline fill="none" stroke="black" points="502,-912 506,-916 "></polyline>
+<text text-anchor="middle" x="479" y="-896.1" font-family="Times,serif" font-size="8.00">64kB</text>
+</a>
+</g>
+</g>
+<!-- N4&#45;&gt;NN4_0 -->
+<g id="edge2" class="edge">
+<title>N4-&gt;NN4_0</title>
+<g id="a_edge2"><a xlink:title="1089.33kB">
+<path fill="none" stroke="black" d="M479,-974.75C479,-958.88 479,-940.94 479,-926.51"></path>
+<polygon fill="black" stroke="black" points="482.5,-926.25 479,-916.25 475.5,-926.25 482.5,-926.25"></polygon>
+</a>
+</g>
+<g id="a_edge2-label"><a xlink:title="1089.33kB">
+<text text-anchor="middle" x="520" y="-941.8" font-family="Times,serif" font-size="14.00"> 1089.33kB</text>
+</a>
+</g>
+</g>
+<!-- N5 -->
+<g id="node5" class="node">
+<title>N5</title>
+<g id="a_node5"><a xlink:title="runtime.allocm (1539kB)">
+<polygon fill="#ede3db" stroke="#b2662c" points="1465,-2357 1241,-2357 1241,-2271 1465,-2271 1465,-2357"></polygon>
+<text text-anchor="middle" x="1353" y="-2333.8" font-family="Times,serif" font-size="24.00">runtime</text>
+<text text-anchor="middle" x="1353" y="-2307.8" font-family="Times,serif" font-size="24.00">allocm</text>
+<text text-anchor="middle" x="1353" y="-2281.8" font-family="Times,serif" font-size="24.00">1539kB (15.03%)</text>
+</a>
+</g>
+</g>
+<!-- NN5_0 -->
+<g id="NN5_0" class="node">
+<title>NN5_0</title>
+<g id="a_NN5_0"><a xlink:title="1539kB">
+<polygon fill="#f8f8f8" stroke="black" points="1380,-2204 1330,-2204 1326,-2200 1326,-2168 1376,-2168 1380,-2172 1380,-2204"></polygon>
+<polyline fill="none" stroke="black" points="1376,-2200 1326,-2200 "></polyline>
+<polyline fill="none" stroke="black" points="1376,-2200 1376,-2168 "></polyline>
+<polyline fill="none" stroke="black" points="1376,-2200 1380,-2204 "></polyline>
+<text text-anchor="middle" x="1353" y="-2184.1" font-family="Times,serif" font-size="8.00">2kB</text>
+</a>
+</g>
+</g>
+<!-- N5&#45;&gt;NN5_0 -->
+<g id="edge3" class="edge">
+<title>N5-&gt;NN5_0</title>
+<g id="a_edge3"><a xlink:title="1539kB">
+<path fill="none" stroke="black" d="M1353,-2270.69C1353,-2252.04 1353,-2230.67 1353,-2214.19"></path>
+<polygon fill="black" stroke="black" points="1356.5,-2214.15 1353,-2204.15 1349.5,-2214.15 1356.5,-2214.15"></polygon>
+</a>
+</g>
+<g id="a_edge3-label"><a xlink:title="1539kB">
+<text text-anchor="middle" x="1383" y="-2241.8" font-family="Times,serif" font-size="14.00"> 1539kB</text>
+</a>
+</g>
+</g>
+<!-- N6 -->
+<g id="node6" class="node">
+<title>N6</title>
+<g id="a_node6"><a xlink:title="net/http.(*persistConn).addTLS.func2 (3072.70kB)">
+<polygon fill="#eddcd5" stroke="#b23600" points="315.5,-2575.5 198.5,-2575.5 198.5,-2522.5 315.5,-2522.5 315.5,-2575.5"></polygon>
+<text text-anchor="middle" x="257" y="-2565.1" font-family="Times,serif" font-size="8.00">http</text>
+<text text-anchor="middle" x="257" y="-2556.1" font-family="Times,serif" font-size="8.00">(*persistConn)</text>
+<text text-anchor="middle" x="257" y="-2547.1" font-family="Times,serif" font-size="8.00">addTLS</text>
+<text text-anchor="middle" x="257" y="-2538.1" font-family="Times,serif" font-size="8.00">func2</text>
+<text text-anchor="middle" x="257" y="-2529.1" font-family="Times,serif" font-size="8.00">0 of 3072.70kB (30.01%)</text>
+</a>
+</g>
+</g>
+<!-- N38 -->
+<g id="node38" class="node">
+<title>N38</title>
+<g id="a_node38"><a xlink:title="crypto/tls.(*Conn).HandshakeContext (3072.70kB)">
+<polygon fill="#eddcd5" stroke="#b23600" points="315.5,-2452 198.5,-2452 198.5,-2408 315.5,-2408 315.5,-2452"></polygon>
+<text text-anchor="middle" x="257" y="-2441.6" font-family="Times,serif" font-size="8.00">tls</text>
+<text text-anchor="middle" x="257" y="-2432.6" font-family="Times,serif" font-size="8.00">(*Conn)</text>
+<text text-anchor="middle" x="257" y="-2423.6" font-family="Times,serif" font-size="8.00">HandshakeContext</text>
+<text text-anchor="middle" x="257" y="-2414.6" font-family="Times,serif" font-size="8.00">0 of 3072.70kB (30.01%)</text>
+</a>
+</g>
+</g>
+<!-- N6&#45;&gt;N38 -->
+<g id="edge29" class="edge">
+<title>N6-&gt;N38</title>
+<g id="a_edge29"><a xlink:title="net/http.(*persistConn).addTLS.func2 -&gt; crypto/tls.(*Conn).HandshakeContext (3072.70kB)">
+<path fill="none" stroke="#b23600" stroke-width="2" d="M257,-2522.32C257,-2504.7 257,-2481.19 257,-2462.44"></path>
+<polygon fill="#b23600" stroke="#b23600" stroke-width="2" points="260.5,-2462.31 257,-2452.31 253.5,-2462.31 260.5,-2462.31"></polygon>
+</a>
+</g>
+<g id="a_edge29-label"><a xlink:title="net/http.(*persistConn).addTLS.func2 -&gt; crypto/tls.(*Conn).HandshakeContext (3072.70kB)">
+<text text-anchor="middle" x="298" y="-2488.8" font-family="Times,serif" font-size="14.00"> 3072.70kB</text>
+<text text-anchor="middle" x="298" y="-2473.8" font-family="Times,serif" font-size="14.00"> (inline)</text>
+</a>
+</g>
+</g>
+<!-- N14 -->
+<g id="node14" class="node">
+<title>N14</title>
+<g id="a_node14"><a xlink:title="main.(*ObjectStorer).Store (1963.48kB)">
+<polygon fill="#eddfd6" stroke="#b24a07" points="865.5,-2079 748.5,-2079 748.5,-2035 865.5,-2035 865.5,-2079"></polygon>
+<text text-anchor="middle" x="807" y="-2068.6" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="807" y="-2059.6" font-family="Times,serif" font-size="8.00">(*ObjectStorer)</text>
+<text text-anchor="middle" x="807" y="-2050.6" font-family="Times,serif" font-size="8.00">Store</text>
+<text text-anchor="middle" x="807" y="-2041.6" font-family="Times,serif" font-size="8.00">0 of 1963.48kB (19.18%)</text>
+</a>
+</g>
+</g>
+<!-- N7&#45;&gt;N14 -->
+<g id="edge35" class="edge">
+<title>N7-&gt;N14</title>
+<g id="a_edge35"><a xlink:title="main.(*ObjectBuilder).ForEachObject -&gt; main.(*ObjectStorer).Store (1963.48kB)">
+<path fill="none" stroke="#b24a07" d="M897.72,-2163.94C883.41,-2155.83 868.13,-2145.68 856,-2134 842.33,-2120.83 830.64,-2103.15 822.11,-2088.15"></path>
+<polygon fill="#b24a07" stroke="#b24a07" points="825.1,-2086.32 817.22,-2079.23 818.96,-2089.68 825.1,-2086.32"></polygon>
+</a>
+</g>
+<g id="a_edge35-label"><a xlink:title="main.(*ObjectBuilder).ForEachObject -&gt; main.(*ObjectStorer).Store (1963.48kB)">
+<text text-anchor="middle" x="897" y="-2122.8" font-family="Times,serif" font-size="14.00"> 1963.48kB</text>
+</a>
+</g>
+</g>
+<!-- N51 -->
+<g id="node51" class="node">
+<title>N51</title>
+<g id="a_node51"><a xlink:title="main.(*ObjectBuilder).buildObject (1033.68kB)">
+<polygon fill="#ede7e1" stroke="#b28558" points="1000.5,-2079 883.5,-2079 883.5,-2035 1000.5,-2035 1000.5,-2079"></polygon>
+<text text-anchor="middle" x="942" y="-2068.6" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="942" y="-2059.6" font-family="Times,serif" font-size="8.00">(*ObjectBuilder)</text>
+<text text-anchor="middle" x="942" y="-2050.6" font-family="Times,serif" font-size="8.00">buildObject</text>
+<text text-anchor="middle" x="942" y="-2041.6" font-family="Times,serif" font-size="8.00">0 of 1033.68kB (10.10%)</text>
+</a>
+</g>
+</g>
+<!-- N7&#45;&gt;N51 -->
+<g id="edge44" class="edge">
+<title>N7-&gt;N51</title>
+<g id="a_edge44"><a xlink:title="main.(*ObjectBuilder).ForEachObject -&gt; main.(*ObjectBuilder).buildObject (1033.68kB)">
+<path fill="none" stroke="#b28558" d="M942,-2163.74C942,-2143.41 942,-2112.51 942,-2089.35"></path>
+<polygon fill="#b28558" stroke="#b28558" points="945.5,-2089.33 942,-2079.33 938.5,-2089.33 945.5,-2089.33"></polygon>
+</a>
+</g>
+<g id="a_edge44-label"><a xlink:title="main.(*ObjectBuilder).ForEachObject -&gt; main.(*ObjectBuilder).buildObject (1033.68kB)">
+<text text-anchor="middle" x="983" y="-2122.8" font-family="Times,serif" font-size="14.00"> 1033.68kB</text>
+</a>
+</g>
+</g>
+<!-- N8 -->
+<g id="node8" class="node">
+<title>N8</title>
+<g id="a_node8"><a xlink:title="compress/flate.NewWriter (1451.43kB)">
+<polygon fill="#ede3dc" stroke="#b26c33" points="939,-1415 675,-1415 675,-1315 939,-1315 939,-1415"></polygon>
+<text text-anchor="middle" x="807" y="-1394.2" font-family="Times,serif" font-size="21.00">flate</text>
+<text text-anchor="middle" x="807" y="-1371.2" font-family="Times,serif" font-size="21.00">NewWriter</text>
+<text text-anchor="middle" x="807" y="-1348.2" font-family="Times,serif" font-size="21.00">902.59kB (8.82%)</text>
+<text text-anchor="middle" x="807" y="-1325.2" font-family="Times,serif" font-size="21.00">of 1451.43kB (14.18%)</text>
+</a>
+</g>
+</g>
+<!-- NN8_0 -->
+<g id="NN8_0" class="node">
+<title>NN8_0</title>
+<g id="a_NN8_0"><a xlink:title="902.59kB">
+<polygon fill="#f8f8f8" stroke="black" points="834,-1260 784,-1260 780,-1256 780,-1224 830,-1224 834,-1228 834,-1260"></polygon>
+<polyline fill="none" stroke="black" points="830,-1256 780,-1256 "></polyline>
+<polyline fill="none" stroke="black" points="830,-1256 830,-1224 "></polyline>
+<polyline fill="none" stroke="black" points="830,-1256 834,-1260 "></polyline>
+<text text-anchor="middle" x="807" y="-1240.1" font-family="Times,serif" font-size="8.00">648kB</text>
+</a>
+</g>
+</g>
+<!-- N8&#45;&gt;NN8_0 -->
+<g id="edge4" class="edge">
+<title>N8-&gt;NN8_0</title>
+<g id="a_edge4"><a xlink:title="902.59kB">
+<path fill="none" stroke="black" d="M807,-1314.78C807,-1299.65 807,-1283.55 807,-1270.43"></path>
+<polygon fill="black" stroke="black" points="810.5,-1270.21 807,-1260.21 803.5,-1270.21 810.5,-1270.21"></polygon>
+</a>
+</g>
+<g id="a_edge4-label"><a xlink:title="902.59kB">
+<text text-anchor="middle" x="843.5" y="-1285.8" font-family="Times,serif" font-size="14.00"> 902.59kB</text>
+</a>
+</g>
+</g>
+<!-- N32 -->
+<g id="node32" class="node">
+<title>N32</title>
+<g id="a_node32"><a xlink:title="compress/flate.(*compressor).init (548.84kB)">
+<polygon fill="#edeae6" stroke="#b29e82" points="948.5,-1169 841.5,-1169 841.5,-1125 948.5,-1125 948.5,-1169"></polygon>
+<text text-anchor="middle" x="895" y="-1158.6" font-family="Times,serif" font-size="8.00">flate</text>
+<text text-anchor="middle" x="895" y="-1149.6" font-family="Times,serif" font-size="8.00">(*compressor)</text>
+<text text-anchor="middle" x="895" y="-1140.6" font-family="Times,serif" font-size="8.00">init</text>
+<text text-anchor="middle" x="895" y="-1131.6" font-family="Times,serif" font-size="8.00">0 of 548.84kB (5.36%)</text>
+</a>
+</g>
+</g>
+<!-- N8&#45;&gt;N32 -->
+<g id="edge49" class="edge">
+<title>N8-&gt;N32</title>
+<g id="a_edge49"><a xlink:title="compress/flate.NewWriter -&gt; compress/flate.(*compressor).init (548.84kB)">
+<path fill="none" stroke="#b29e82" d="M869.51,-1314.63C873.95,-1309.1 877.9,-1303.2 881,-1297 899.63,-1259.8 900.43,-1210.85 898.42,-1179.39"></path>
+<polygon fill="#b29e82" stroke="#b29e82" points="901.88,-1178.74 897.62,-1169.04 894.9,-1179.29 901.88,-1178.74"></polygon>
+</a>
+</g>
+<g id="a_edge49-label"><a xlink:title="compress/flate.NewWriter -&gt; compress/flate.(*compressor).init (548.84kB)">
+<text text-anchor="middle" x="935.5" y="-1238.3" font-family="Times,serif" font-size="14.00"> 548.84kB</text>
+</a>
+</g>
+</g>
+<!-- N9 -->
+<g id="node9" class="node">
+<title>N9</title>
+<g id="a_node9"><a xlink:title="sync.(*Once).Do (3617.36kB)">
+<polygon fill="#eddbd5" stroke="#b22f00" points="315.5,-1387 198.5,-1387 198.5,-1343 315.5,-1343 315.5,-1387"></polygon>
+<text text-anchor="middle" x="257" y="-1376.6" font-family="Times,serif" font-size="8.00">sync</text>
+<text text-anchor="middle" x="257" y="-1367.6" font-family="Times,serif" font-size="8.00">(*Once)</text>
+<text text-anchor="middle" x="257" y="-1358.6" font-family="Times,serif" font-size="8.00">Do</text>
+<text text-anchor="middle" x="257" y="-1349.6" font-family="Times,serif" font-size="8.00">0 of 3617.36kB (35.33%)</text>
+</a>
+</g>
+</g>
+<!-- N10 -->
+<g id="node10" class="node">
+<title>N10</title>
+<g id="a_node10"><a xlink:title="sync.(*Once).doSlow (3617.36kB)">
+<polygon fill="#eddbd5" stroke="#b22f00" points="315.5,-1264 198.5,-1264 198.5,-1220 315.5,-1220 315.5,-1264"></polygon>
+<text text-anchor="middle" x="257" y="-1253.6" font-family="Times,serif" font-size="8.00">sync</text>
+<text text-anchor="middle" x="257" y="-1244.6" font-family="Times,serif" font-size="8.00">(*Once)</text>
+<text text-anchor="middle" x="257" y="-1235.6" font-family="Times,serif" font-size="8.00">doSlow</text>
+<text text-anchor="middle" x="257" y="-1226.6" font-family="Times,serif" font-size="8.00">0 of 3617.36kB (35.33%)</text>
+</a>
+</g>
+</g>
+<!-- N9&#45;&gt;N10 -->
+<g id="edge19" class="edge">
+<title>N9-&gt;N10</title>
+<g id="a_edge19"><a xlink:title="sync.(*Once).Do -&gt; sync.(*Once).doSlow (3617.36kB)">
+<path fill="none" stroke="#b22f00" stroke-width="2" d="M257,-1342.92C257,-1323.95 257,-1295.83 257,-1274.24"></path>
+<polygon fill="#b22f00" stroke="#b22f00" stroke-width="2" points="260.5,-1274.24 257,-1264.24 253.5,-1274.24 260.5,-1274.24"></polygon>
+</a>
+</g>
+<g id="a_edge19-label"><a xlink:title="sync.(*Once).Do -&gt; sync.(*Once).doSlow (3617.36kB)">
+<text text-anchor="middle" x="298" y="-1285.8" font-family="Times,serif" font-size="14.00"> 3617.36kB</text>
+</a>
+</g>
+</g>
+<!-- N46 -->
+<g id="node46" class="node">
+<title>N46</title>
+<g id="a_node46"><a xlink:title="crypto/x509.initSystemRoots (3072.70kB)">
+<polygon fill="#eddcd5" stroke="#b23600" points="315.5,-1165 198.5,-1165 198.5,-1129 315.5,-1129 315.5,-1165"></polygon>
+<text text-anchor="middle" x="257" y="-1154.1" font-family="Times,serif" font-size="8.00">x509</text>
+<text text-anchor="middle" x="257" y="-1145.1" font-family="Times,serif" font-size="8.00">initSystemRoots</text>
+<text text-anchor="middle" x="257" y="-1136.1" font-family="Times,serif" font-size="8.00">0 of 3072.70kB (30.01%)</text>
+</a>
+</g>
+</g>
+<!-- N10&#45;&gt;N46 -->
+<g id="edge30" class="edge">
+<title>N10-&gt;N46</title>
+<g id="a_edge30"><a xlink:title="sync.(*Once).doSlow -&gt; crypto/x509.initSystemRoots (3072.70kB)">
+<path fill="none" stroke="#b23600" stroke-width="2" d="M257,-1219.9C257,-1206.74 257,-1189.68 257,-1175.48"></path>
+<polygon fill="#b23600" stroke="#b23600" stroke-width="2" points="260.5,-1175.28 257,-1165.28 253.5,-1175.28 260.5,-1175.28"></polygon>
+</a>
+</g>
+<g id="a_edge30-label"><a xlink:title="sync.(*Once).doSlow -&gt; crypto/x509.initSystemRoots (3072.70kB)">
+<text text-anchor="middle" x="298" y="-1190.8" font-family="Times,serif" font-size="14.00"> 3072.70kB</text>
+</a>
+</g>
+</g>
+<!-- N63 -->
+<g id="node63" class="node">
+<title>N63</title>
+<g id="a_node63"><a xlink:title="net.(*resolverConfig).init (544.67kB)">
+<polygon fill="#edeae6" stroke="#b29e83" points="440.5,-1169 333.5,-1169 333.5,-1125 440.5,-1125 440.5,-1169"></polygon>
+<text text-anchor="middle" x="387" y="-1158.6" font-family="Times,serif" font-size="8.00">net</text>
+<text text-anchor="middle" x="387" y="-1149.6" font-family="Times,serif" font-size="8.00">(*resolverConfig)</text>
+<text text-anchor="middle" x="387" y="-1140.6" font-family="Times,serif" font-size="8.00">init</text>
+<text text-anchor="middle" x="387" y="-1131.6" font-family="Times,serif" font-size="8.00">0 of 544.67kB (5.32%)</text>
+</a>
+</g>
+</g>
+<!-- N10&#45;&gt;N63 -->
+<g id="edge57" class="edge">
+<title>N10-&gt;N63</title>
+<g id="a_edge57"><a xlink:title="sync.(*Once).doSlow -&gt; net.(*resolverConfig).init (544.67kB)">
+<path fill="none" stroke="#b29e83" d="M313.73,-1219.8C323.96,-1214.74 334.17,-1208.8 343,-1202 351.93,-1195.12 360.19,-1186.09 367.08,-1177.39"></path>
+<polygon fill="#b29e83" stroke="#b29e83" points="370.01,-1179.32 373.25,-1169.23 364.43,-1175.1 370.01,-1179.32"></polygon>
+</a>
+</g>
+<g id="a_edge57-label"><a xlink:title="sync.(*Once).doSlow -&gt; net.(*resolverConfig).init (544.67kB)">
+<text text-anchor="middle" x="395.5" y="-1190.8" font-family="Times,serif" font-size="14.00"> 544.67kB</text>
+</a>
+</g>
+</g>
+<!-- N11 -->
+<g id="node11" class="node">
+<title>N11</title>
+<g id="a_node11"><a xlink:title="main.(*ObjectBuilder).readObjectData (1033.68kB)">
+<polygon fill="#ede7e1" stroke="#b28558" points="1130.5,-1828 883.5,-1828 883.5,-1724 1130.5,-1724 1130.5,-1828"></polygon>
+<text text-anchor="middle" x="1007" y="-1806.4" font-family="Times,serif" font-size="22.00">main</text>
+<text text-anchor="middle" x="1007" y="-1782.4" font-family="Times,serif" font-size="22.00">(*ObjectBuilder)</text>
+<text text-anchor="middle" x="1007" y="-1758.4" font-family="Times,serif" font-size="22.00">readObjectData</text>
+<text text-anchor="middle" x="1007" y="-1734.4" font-family="Times,serif" font-size="22.00">1033.68kB (10.10%)</text>
+</a>
+</g>
+</g>
+<!-- NN11_0 -->
+<g id="NN11_0" class="node">
+<title>NN11_0</title>
+<g id="a_NN11_0"><a xlink:title="521.05kB">
+<polygon fill="#f8f8f8" stroke="black" points="951,-1628 901,-1628 897,-1624 897,-1592 947,-1592 951,-1596 951,-1628"></polygon>
+<polyline fill="none" stroke="black" points="947,-1624 897,-1624 "></polyline>
+<polyline fill="none" stroke="black" points="947,-1624 947,-1592 "></polyline>
+<polyline fill="none" stroke="black" points="947,-1624 951,-1628 "></polyline>
+<text text-anchor="middle" x="924" y="-1608.1" font-family="Times,serif" font-size="8.00">18kB</text>
+</a>
+</g>
+</g>
+<!-- N11&#45;&gt;NN11_0 -->
+<g id="edge5" class="edge">
+<title>N11-&gt;NN11_0</title>
+<g id="a_edge5"><a xlink:title="521.05kB">
+<path fill="none" stroke="black" d="M947.21,-1723.67C942.91,-1718.07 939.07,-1712.15 936,-1706 925.48,-1684.91 922.93,-1658.05 922.75,-1638.28"></path>
+<polygon fill="black" stroke="black" points="926.25,-1638.14 922.86,-1628.1 919.25,-1638.06 926.25,-1638.14"></polygon>
+</a>
+</g>
+<g id="a_edge5-label"><a xlink:title="521.05kB">
+<text text-anchor="middle" x="972.5" y="-1680.3" font-family="Times,serif" font-size="14.00"> 521.05kB</text>
+</a>
+</g>
+</g>
+<!-- NN11_1 -->
+<g id="NN11_1" class="node">
+<title>NN11_1</title>
+<g id="a_NN11_1"><a xlink:title="512.62kB">
+<polygon fill="#f8f8f8" stroke="black" points="1047,-1628 997,-1628 993,-1624 993,-1592 1043,-1592 1047,-1596 1047,-1628"></polygon>
+<polyline fill="none" stroke="black" points="1043,-1624 993,-1624 "></polyline>
+<polyline fill="none" stroke="black" points="1043,-1624 1043,-1592 "></polyline>
+<polyline fill="none" stroke="black" points="1043,-1624 1047,-1628 "></polyline>
+<text text-anchor="middle" x="1020" y="-1608.1" font-family="Times,serif" font-size="8.00">1.25kB</text>
+</a>
+</g>
+</g>
+<!-- N11&#45;&gt;NN11_1 -->
+<g id="edge6" class="edge">
+<title>N11-&gt;NN11_1</title>
+<g id="a_edge6"><a xlink:title="512.62kB">
+<path fill="none" stroke="black" d="M1011.08,-1723.56C1013.31,-1695.34 1016,-1661.48 1017.83,-1638.32"></path>
+<polygon fill="black" stroke="black" points="1021.34,-1638.43 1018.64,-1628.19 1014.36,-1637.88 1021.34,-1638.43"></polygon>
+</a>
+</g>
+<g id="a_edge6-label"><a xlink:title="512.62kB">
+<text text-anchor="middle" x="1052.5" y="-1680.3" font-family="Times,serif" font-size="14.00"> 512.62kB</text>
+</a>
+</g>
+</g>
+<!-- N12 -->
+<g id="node12" class="node">
+<title>N12</title>
+<g id="a_node12"><a xlink:title="crypto/x509.loadSystemRoots (3072.70kB)">
+<polygon fill="#eddcd5" stroke="#b23600" points="315.5,-1033 198.5,-1033 198.5,-997 315.5,-997 315.5,-1033"></polygon>
+<text text-anchor="middle" x="257" y="-1022.1" font-family="Times,serif" font-size="8.00">x509</text>
+<text text-anchor="middle" x="257" y="-1013.1" font-family="Times,serif" font-size="8.00">loadSystemRoots</text>
+<text text-anchor="middle" x="257" y="-1004.1" font-family="Times,serif" font-size="8.00">0 of 3072.70kB (30.01%)</text>
+</a>
+</g>
+</g>
+<!-- N13 -->
+<g id="node13" class="node">
+<title>N13</title>
+<g id="a_node13"><a xlink:title="crypto/x509.(*CertPool).AppendCertsFromPEM (2560.66kB)">
+<polygon fill="#edddd5" stroke="#b23c00" points="315.5,-920 198.5,-920 198.5,-876 315.5,-876 315.5,-920"></polygon>
+<text text-anchor="middle" x="257" y="-909.6" font-family="Times,serif" font-size="8.00">x509</text>
+<text text-anchor="middle" x="257" y="-900.6" font-family="Times,serif" font-size="8.00">(*CertPool)</text>
+<text text-anchor="middle" x="257" y="-891.6" font-family="Times,serif" font-size="8.00">AppendCertsFromPEM</text>
+<text text-anchor="middle" x="257" y="-882.6" font-family="Times,serif" font-size="8.00">0 of 2560.66kB (25.01%)</text>
+</a>
+</g>
+</g>
+<!-- N12&#45;&gt;N13 -->
+<g id="edge32" class="edge">
+<title>N12-&gt;N13</title>
+<g id="a_edge32"><a xlink:title="crypto/x509.loadSystemRoots -&gt; crypto/x509.(*CertPool).AppendCertsFromPEM (2560.66kB)">
+<path fill="none" stroke="#b23c00" stroke-width="2" d="M257,-996.53C257,-979.01 257,-951.64 257,-930.35"></path>
+<polygon fill="#b23c00" stroke="#b23c00" stroke-width="2" points="260.5,-930.15 257,-920.15 253.5,-930.15 260.5,-930.15"></polygon>
+</a>
+</g>
+<g id="a_edge32-label"><a xlink:title="crypto/x509.loadSystemRoots -&gt; crypto/x509.(*CertPool).AppendCertsFromPEM (2560.66kB)">
+<text text-anchor="middle" x="298" y="-941.8" font-family="Times,serif" font-size="14.00"> 2560.66kB</text>
+</a>
+</g>
+</g>
+<!-- N48 -->
+<g id="node48" class="node">
+<title>N48</title>
+<g id="a_node48"><a xlink:title="crypto/x509.readUniqueDirectoryEntries (512.03kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="174,-916 44,-916 44,-880 174,-880 174,-916"></polygon>
+<text text-anchor="middle" x="109" y="-905.1" font-family="Times,serif" font-size="8.00">x509</text>
+<text text-anchor="middle" x="109" y="-896.1" font-family="Times,serif" font-size="8.00">readUniqueDirectoryEntries</text>
+<text text-anchor="middle" x="109" y="-887.1" font-family="Times,serif" font-size="8.00">0 of 512.03kB (5.00%)</text>
+</a>
+</g>
+</g>
+<!-- N12&#45;&gt;N48 -->
+<g id="edge71" class="edge">
+<title>N12-&gt;N48</title>
+<g id="a_edge71"><a xlink:title="crypto/x509.loadSystemRoots -&gt; crypto/x509.readUniqueDirectoryEntries (512.03kB)">
+<path fill="none" stroke="#b2a085" d="M234.84,-996.78C209.45,-977.05 167.69,-944.6 139.3,-922.54"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="141.35,-919.71 131.31,-916.33 137.06,-925.23 141.35,-919.71"></polygon>
+</a>
+</g>
+<g id="a_edge71-label"><a xlink:title="crypto/x509.loadSystemRoots -&gt; crypto/x509.readUniqueDirectoryEntries (512.03kB)">
+<text text-anchor="middle" x="211.5" y="-941.8" font-family="Times,serif" font-size="14.00"> 512.03kB</text>
+</a>
+</g>
+</g>
+<!-- N21 -->
+<g id="node21" class="node">
+<title>N21</title>
+<g id="a_node21"><a xlink:title="encoding/pem.Decode (512.50kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="514,-825 334,-825 334,-757 514,-757 514,-825"></polygon>
+<text text-anchor="middle" x="424" y="-806.6" font-family="Times,serif" font-size="18.00">pem</text>
+<text text-anchor="middle" x="424" y="-786.6" font-family="Times,serif" font-size="18.00">Decode</text>
+<text text-anchor="middle" x="424" y="-766.6" font-family="Times,serif" font-size="18.00">512.50kB (5.01%)</text>
+</a>
+</g>
+</g>
+<!-- N13&#45;&gt;N21 -->
+<g id="edge64" class="edge">
+<title>N13-&gt;N21</title>
+<g id="a_edge64"><a xlink:title="crypto/x509.(*CertPool).AppendCertsFromPEM -&gt; encoding/pem.Decode (512.50kB)">
+<path fill="none" stroke="#b2a085" d="M309.51,-875.79C320.84,-870.51 332.55,-864.48 343,-858 355.53,-850.24 368.26,-840.75 379.81,-831.42"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="382.1,-834.07 387.6,-825.01 377.66,-828.67 382.1,-834.07"></polygon>
+</a>
+</g>
+<g id="a_edge64-label"><a xlink:title="crypto/x509.(*CertPool).AppendCertsFromPEM -&gt; encoding/pem.Decode (512.50kB)">
+<text text-anchor="middle" x="401.5" y="-846.8" font-family="Times,serif" font-size="14.00"> 512.50kB</text>
+</a>
+</g>
+</g>
+<!-- N45 -->
+<g id="node45" class="node">
+<title>N45</title>
+<g id="a_node45"><a xlink:title="crypto/x509.ParseCertificate (2048.16kB)">
+<polygon fill="#edded5" stroke="#b24400" points="315.5,-809 198.5,-809 198.5,-773 315.5,-773 315.5,-809"></polygon>
+<text text-anchor="middle" x="257" y="-798.1" font-family="Times,serif" font-size="8.00">x509</text>
+<text text-anchor="middle" x="257" y="-789.1" font-family="Times,serif" font-size="8.00">ParseCertificate</text>
+<text text-anchor="middle" x="257" y="-780.1" font-family="Times,serif" font-size="8.00">0 of 2048.16kB (20.00%)</text>
+</a>
+</g>
+</g>
+<!-- N13&#45;&gt;N45 -->
+<g id="edge33" class="edge">
+<title>N13-&gt;N45</title>
+<g id="a_edge33"><a xlink:title="crypto/x509.(*CertPool).AppendCertsFromPEM -&gt; crypto/x509.ParseCertificate (2048.16kB)">
+<path fill="none" stroke="#b24400" stroke-width="2" d="M257,-875.75C257,-859.47 257,-836.9 257,-819.28"></path>
+<polygon fill="#b24400" stroke="#b24400" stroke-width="2" points="260.5,-819.06 257,-809.06 253.5,-819.06 260.5,-819.06"></polygon>
+</a>
+</g>
+<g id="a_edge33-label"><a xlink:title="crypto/x509.(*CertPool).AppendCertsFromPEM -&gt; crypto/x509.ParseCertificate (2048.16kB)">
+<text text-anchor="middle" x="298" y="-846.8" font-family="Times,serif" font-size="14.00"> 2048.16kB</text>
+</a>
+</g>
+</g>
+<!-- N24 -->
+<g id="node24" class="node">
+<title>N24</title>
+<g id="a_node24"><a xlink:title="os.newFile (512.05kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="730,-1947 550,-1947 550,-1879 730,-1879 730,-1947"></polygon>
+<text text-anchor="middle" x="640" y="-1928.6" font-family="Times,serif" font-size="18.00">os</text>
+<text text-anchor="middle" x="640" y="-1908.6" font-family="Times,serif" font-size="18.00">newFile</text>
+<text text-anchor="middle" x="640" y="-1888.6" font-family="Times,serif" font-size="18.00">512.05kB (5.00%)</text>
+</a>
+</g>
+</g>
+<!-- N14&#45;&gt;N24 -->
+<g id="edge69" class="edge">
+<title>N14-&gt;N24</title>
+<g id="a_edge69"><a xlink:title="main.(*ObjectStorer).Store ... os.newFile (512.05kB)">
+<path fill="none" stroke="#b2a085" stroke-dasharray="1,5" d="M779.58,-2034.96C764.73,-2023.38 746.16,-2008.65 730,-1995 714.55,-1981.95 697.99,-1967.26 683.35,-1954.02"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="685.64,-1951.37 675.89,-1947.24 680.94,-1956.55 685.64,-1951.37"></polygon>
+</a>
+</g>
+<g id="a_edge69-label"><a xlink:title="main.(*ObjectStorer).Store ... os.newFile (512.05kB)">
+<text text-anchor="middle" x="766.5" y="-1976.3" font-family="Times,serif" font-size="14.00"> 512.05kB</text>
+</a>
+</g>
+</g>
+<!-- N53 -->
+<g id="node53" class="node">
+<title>N53</title>
+<g id="a_node53"><a xlink:title="main.(*ObjectStorer).writeCompressed (1451.43kB)">
+<polygon fill="#ede3dc" stroke="#b26c33" points="865.5,-1935 748.5,-1935 748.5,-1891 865.5,-1891 865.5,-1935"></polygon>
+<text text-anchor="middle" x="807" y="-1924.6" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="807" y="-1915.6" font-family="Times,serif" font-size="8.00">(*ObjectStorer)</text>
+<text text-anchor="middle" x="807" y="-1906.6" font-family="Times,serif" font-size="8.00">writeCompressed</text>
+<text text-anchor="middle" x="807" y="-1897.6" font-family="Times,serif" font-size="8.00">0 of 1451.43kB (14.18%)</text>
+</a>
+</g>
+</g>
+<!-- N14&#45;&gt;N53 -->
+<g id="edge40" class="edge">
+<title>N14-&gt;N53</title>
+<g id="a_edge40"><a xlink:title="main.(*ObjectStorer).Store -&gt; main.(*ObjectStorer).writeCompressed (1451.43kB)">
+<path fill="none" stroke="#b26c33" d="M807,-2034.74C807,-2011.11 807,-1972.7 807,-1945.56"></path>
+<polygon fill="#b26c33" stroke="#b26c33" points="810.5,-1945.4 807,-1935.4 803.5,-1945.4 810.5,-1945.4"></polygon>
+</a>
+</g>
+<g id="a_edge40-label"><a xlink:title="main.(*ObjectStorer).Store -&gt; main.(*ObjectStorer).writeCompressed (1451.43kB)">
+<text text-anchor="middle" x="848" y="-1976.3" font-family="Times,serif" font-size="14.00"> 1451.43kB</text>
+</a>
+</g>
+</g>
+<!-- N15 -->
+<g id="node15" class="node">
+<title>N15</title>
+<g id="a_node15"><a xlink:title="runtime.schedule (1539kB)">
+<polygon fill="#ede3db" stroke="#b2662c" points="1405,-2448 1301,-2448 1301,-2412 1405,-2412 1405,-2448"></polygon>
+<text text-anchor="middle" x="1353" y="-2437.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="1353" y="-2428.1" font-family="Times,serif" font-size="8.00">schedule</text>
+<text text-anchor="middle" x="1353" y="-2419.1" font-family="Times,serif" font-size="8.00">0 of 1539kB (15.03%)</text>
+</a>
+</g>
+</g>
+<!-- N15&#45;&gt;N5 -->
+<g id="edge36" class="edge">
+<title>N15-&gt;N5</title>
+<g id="a_edge36"><a xlink:title="runtime.schedule ... runtime.allocm (1539kB)">
+<path fill="none" stroke="#b2662c" stroke-dasharray="1,5" d="M1353,-2411.69C1353,-2399.83 1353,-2383.43 1353,-2367.5"></path>
+<polygon fill="#b2662c" stroke="#b2662c" points="1356.5,-2367.16 1353,-2357.16 1349.5,-2367.16 1356.5,-2367.16"></polygon>
+</a>
+</g>
+<g id="a_edge36-label"><a xlink:title="runtime.schedule ... runtime.allocm (1539kB)">
+<text text-anchor="middle" x="1383" y="-2378.8" font-family="Times,serif" font-size="14.00"> 1539kB</text>
+</a>
+</g>
+</g>
+<!-- N16 -->
+<g id="node16" class="node">
+<title>N16</title>
+<g id="a_node16"><a xlink:title="compress/flate.(*compressor).initDeflate (548.84kB)">
+<polygon fill="#edeae6" stroke="#b29e82" points="985,-1059 805,-1059 805,-971 985,-971 985,-1059"></polygon>
+<text text-anchor="middle" x="895" y="-1040.6" font-family="Times,serif" font-size="18.00">flate</text>
+<text text-anchor="middle" x="895" y="-1020.6" font-family="Times,serif" font-size="18.00">(*compressor)</text>
+<text text-anchor="middle" x="895" y="-1000.6" font-family="Times,serif" font-size="18.00">initDeflate</text>
+<text text-anchor="middle" x="895" y="-980.6" font-family="Times,serif" font-size="18.00">548.84kB (5.36%)</text>
+</a>
+</g>
+</g>
+<!-- NN16_0 -->
+<g id="NN16_0" class="node">
+<title>NN16_0</title>
+<g id="a_NN16_0"><a xlink:title="548.84kB">
+<polygon fill="#f8f8f8" stroke="black" points="922,-916 872,-916 868,-912 868,-880 918,-880 922,-884 922,-916"></polygon>
+<polyline fill="none" stroke="black" points="918,-912 868,-912 "></polyline>
+<polyline fill="none" stroke="black" points="918,-912 918,-880 "></polyline>
+<polyline fill="none" stroke="black" points="918,-912 922,-916 "></polyline>
+<text text-anchor="middle" x="895" y="-896.1" font-family="Times,serif" font-size="8.00">72kB</text>
+</a>
+</g>
+</g>
+<!-- N16&#45;&gt;NN16_0 -->
+<g id="edge7" class="edge">
+<title>N16-&gt;NN16_0</title>
+<g id="a_edge7"><a xlink:title="548.84kB">
+<path fill="none" stroke="black" d="M895,-970.85C895,-956.01 895,-939.81 895,-926.56"></path>
+<polygon fill="black" stroke="black" points="898.5,-926.21 895,-916.21 891.5,-926.21 898.5,-926.21"></polygon>
+</a>
+</g>
+<g id="a_edge7-label"><a xlink:title="548.84kB">
+<text text-anchor="middle" x="931.5" y="-941.8" font-family="Times,serif" font-size="14.00"> 548.84kB</text>
+</a>
+</g>
+</g>
+<!-- N17 -->
+<g id="node17" class="node">
+<title>N17</title>
+<g id="a_node17"><a xlink:title="internal/singleflight.(*Group).doCall (1089.33kB)">
+<polygon fill="#ede6e0" stroke="#b28253" points="498.5,-2208 381.5,-2208 381.5,-2164 498.5,-2164 498.5,-2208"></polygon>
+<text text-anchor="middle" x="440" y="-2197.6" font-family="Times,serif" font-size="8.00">singleflight</text>
+<text text-anchor="middle" x="440" y="-2188.6" font-family="Times,serif" font-size="8.00">(*Group)</text>
+<text text-anchor="middle" x="440" y="-2179.6" font-family="Times,serif" font-size="8.00">doCall</text>
+<text text-anchor="middle" x="440" y="-2170.6" font-family="Times,serif" font-size="8.00">0 of 1089.33kB (10.64%)</text>
+</a>
+</g>
+</g>
+<!-- N59 -->
+<g id="node59" class="node">
+<title>N59</title>
+<g id="a_node59"><a xlink:title="net.(*Resolver).lookupIPAddr.func1 (1089.33kB)">
+<polygon fill="#ede6e0" stroke="#b28253" points="498.5,-2083.5 381.5,-2083.5 381.5,-2030.5 498.5,-2030.5 498.5,-2083.5"></polygon>
+<text text-anchor="middle" x="440" y="-2073.1" font-family="Times,serif" font-size="8.00">net</text>
+<text text-anchor="middle" x="440" y="-2064.1" font-family="Times,serif" font-size="8.00">(*Resolver)</text>
+<text text-anchor="middle" x="440" y="-2055.1" font-family="Times,serif" font-size="8.00">lookupIPAddr</text>
+<text text-anchor="middle" x="440" y="-2046.1" font-family="Times,serif" font-size="8.00">func1</text>
+<text text-anchor="middle" x="440" y="-2037.1" font-family="Times,serif" font-size="8.00">0 of 1089.33kB (10.64%)</text>
+</a>
+</g>
+</g>
+<!-- N17&#45;&gt;N59 -->
+<g id="edge42" class="edge">
+<title>N17-&gt;N59</title>
+<g id="a_edge42"><a xlink:title="internal/singleflight.(*Group).doCall -&gt; net.(*Resolver).lookupIPAddr.func1 (1089.33kB)">
+<path fill="none" stroke="#b28253" d="M440,-2163.74C440,-2144.72 440,-2116.45 440,-2093.93"></path>
+<polygon fill="#b28253" stroke="#b28253" points="443.5,-2093.71 440,-2083.71 436.5,-2093.71 443.5,-2093.71"></polygon>
+</a>
+</g>
+<g id="a_edge42-label"><a xlink:title="internal/singleflight.(*Group).doCall -&gt; net.(*Resolver).lookupIPAddr.func1 (1089.33kB)">
+<text text-anchor="middle" x="481" y="-2122.8" font-family="Times,serif" font-size="14.00"> 1089.33kB</text>
+</a>
+</g>
+</g>
+<!-- N18 -->
+<g id="node18" class="node">
+<title>N18</title>
+<g id="a_node18"><a xlink:title="net.(*Resolver).lookupIP (1089.33kB)">
+<polygon fill="#ede6e0" stroke="#b28253" points="498.5,-1935 381.5,-1935 381.5,-1891 498.5,-1891 498.5,-1935"></polygon>
+<text text-anchor="middle" x="440" y="-1924.6" font-family="Times,serif" font-size="8.00">net</text>
+<text text-anchor="middle" x="440" y="-1915.6" font-family="Times,serif" font-size="8.00">(*Resolver)</text>
+<text text-anchor="middle" x="440" y="-1906.6" font-family="Times,serif" font-size="8.00">lookupIP</text>
+<text text-anchor="middle" x="440" y="-1897.6" font-family="Times,serif" font-size="8.00">0 of 1089.33kB (10.64%)</text>
+</a>
+</g>
+</g>
+<!-- N58 -->
+<g id="node58" class="node">
+<title>N58</title>
+<g id="a_node58"><a xlink:title="net.(*Resolver).goLookupIPCNAMEOrder (544.67kB)">
+<polygon fill="#edeae6" stroke="#b29e83" points="573.5,-1706 452.5,-1706 452.5,-1662 573.5,-1662 573.5,-1706"></polygon>
+<text text-anchor="middle" x="513" y="-1695.6" font-family="Times,serif" font-size="8.00">net</text>
+<text text-anchor="middle" x="513" y="-1686.6" font-family="Times,serif" font-size="8.00">(*Resolver)</text>
+<text text-anchor="middle" x="513" y="-1677.6" font-family="Times,serif" font-size="8.00">goLookupIPCNAMEOrder</text>
+<text text-anchor="middle" x="513" y="-1668.6" font-family="Times,serif" font-size="8.00">0 of 544.67kB (5.32%)</text>
+</a>
+</g>
+</g>
+<!-- N18&#45;&gt;N58 -->
+<g id="edge51" class="edge">
+<title>N18-&gt;N58</title>
+<g id="a_edge51"><a xlink:title="net.(*Resolver).lookupIP -&gt; net.(*Resolver).goLookupIPCNAMEOrder (544.67kB)">
+<path fill="none" stroke="#b29e83" d="M464.81,-1890.87C473.17,-1882.43 481.71,-1872.08 487,-1861 509.42,-1814.07 513.59,-1752.74 513.83,-1716.25"></path>
+<polygon fill="#b29e83" stroke="#b29e83" points="517.33,-1716.19 513.79,-1706.21 510.33,-1716.22 517.33,-1716.19"></polygon>
+</a>
+</g>
+<g id="a_edge51-label"><a xlink:title="net.(*Resolver).lookupIP -&gt; net.(*Resolver).goLookupIPCNAMEOrder (544.67kB)">
+<text text-anchor="middle" x="529.5" y="-1849.8" font-family="Times,serif" font-size="14.00"> 544.67kB</text>
+</a>
+</g>
+</g>
+<!-- N61 -->
+<g id="node61" class="node">
+<title>N61</title>
+<g id="a_node61"><a xlink:title="net.(*conf).hostLookupOrder (544.67kB)">
+<polygon fill="#edeae6" stroke="#b29e83" points="455.5,-1798 348.5,-1798 348.5,-1754 455.5,-1754 455.5,-1798"></polygon>
+<text text-anchor="middle" x="402" y="-1787.6" font-family="Times,serif" font-size="8.00">net</text>
+<text text-anchor="middle" x="402" y="-1778.6" font-family="Times,serif" font-size="8.00">(*conf)</text>
+<text text-anchor="middle" x="402" y="-1769.6" font-family="Times,serif" font-size="8.00">hostLookupOrder</text>
+<text text-anchor="middle" x="402" y="-1760.6" font-family="Times,serif" font-size="8.00">0 of 544.67kB (5.32%)</text>
+</a>
+</g>
+</g>
+<!-- N18&#45;&gt;N61 -->
+<g id="edge52" class="edge">
+<title>N18-&gt;N61</title>
+<g id="a_edge52"><a xlink:title="net.(*Resolver).lookupIP -&gt; net.(*conf).hostLookupOrder (544.67kB)">
+<path fill="none" stroke="#b29e83" d="M427.23,-1890.83C422.37,-1881.91 417.24,-1871.23 414,-1861 408.6,-1843.95 405.62,-1824.18 403.99,-1808.1"></path>
+<polygon fill="#b29e83" stroke="#b29e83" points="407.47,-1807.79 403.09,-1798.14 400.5,-1808.41 407.47,-1807.79"></polygon>
+</a>
+</g>
+<g id="a_edge52-label"><a xlink:title="net.(*Resolver).lookupIP -&gt; net.(*conf).hostLookupOrder (544.67kB)">
+<text text-anchor="middle" x="450.5" y="-1849.8" font-family="Times,serif" font-size="14.00"> 544.67kB</text>
+</a>
+</g>
+</g>
+<!-- N19 -->
+<g id="node19" class="node">
+<title>N19</title>
+<g id="a_node19"><a xlink:title="io.copyBuffer (516.01kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="1363,-1644 1183,-1644 1183,-1576 1363,-1576 1363,-1644"></polygon>
+<text text-anchor="middle" x="1273" y="-1625.6" font-family="Times,serif" font-size="18.00">io</text>
+<text text-anchor="middle" x="1273" y="-1605.6" font-family="Times,serif" font-size="18.00">copyBuffer</text>
+<text text-anchor="middle" x="1273" y="-1585.6" font-family="Times,serif" font-size="18.00">516.01kB (5.04%)</text>
+</a>
+</g>
+</g>
+<!-- NN19_0 -->
+<g id="NN19_0" class="node">
+<title>NN19_0</title>
+<g id="a_NN19_0"><a xlink:title="516.01kB">
+<polygon fill="#f8f8f8" stroke="black" points="1300,-1521 1250,-1521 1246,-1517 1246,-1485 1296,-1485 1300,-1489 1300,-1521"></polygon>
+<polyline fill="none" stroke="black" points="1296,-1517 1246,-1517 "></polyline>
+<polyline fill="none" stroke="black" points="1296,-1517 1296,-1485 "></polyline>
+<polyline fill="none" stroke="black" points="1296,-1517 1300,-1521 "></polyline>
+<text text-anchor="middle" x="1273" y="-1501.1" font-family="Times,serif" font-size="8.00">8kB</text>
+</a>
+</g>
+</g>
+<!-- N19&#45;&gt;NN19_0 -->
+<g id="edge8" class="edge">
+<title>N19-&gt;NN19_0</title>
+<g id="a_edge8"><a xlink:title="516.01kB">
+<path fill="none" stroke="black" d="M1273,-1575.78C1273,-1561.46 1273,-1544.92 1273,-1531.33"></path>
+<polygon fill="black" stroke="black" points="1276.5,-1531.16 1273,-1521.16 1269.5,-1531.16 1276.5,-1531.16"></polygon>
+</a>
+</g>
+<g id="a_edge8-label"><a xlink:title="516.01kB">
+<text text-anchor="middle" x="1309.5" y="-1546.8" font-family="Times,serif" font-size="14.00"> 516.01kB</text>
+</a>
+</g>
+</g>
+<!-- N29 -->
+<g id="node29" class="node">
+<title>N29</title>
+<g id="a_node29"><a xlink:title="io.Copy (516.01kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="1324.5,-1931 1217.5,-1931 1217.5,-1895 1324.5,-1895 1324.5,-1931"></polygon>
+<text text-anchor="middle" x="1271" y="-1920.1" font-family="Times,serif" font-size="8.00">io</text>
+<text text-anchor="middle" x="1271" y="-1911.1" font-family="Times,serif" font-size="8.00">Copy</text>
+<text text-anchor="middle" x="1271" y="-1902.1" font-family="Times,serif" font-size="8.00">0 of 516.01kB (5.04%)</text>
+</a>
+</g>
+</g>
+<!-- N19&#45;&gt;N29 -->
+<g id="edge60" class="edge">
+<title>N19-&gt;N29</title>
+<g id="a_edge60"><a xlink:title="io.copyBuffer ... io.Copy (516.01kB)">
+<path fill="none" stroke="#b2a085" stroke-dasharray="1,5" d="M1285.36,-1644.07C1293,-1666.31 1302.06,-1696.49 1306,-1724 1312.54,-1769.76 1315.06,-1782.68 1306,-1828 1301.97,-1848.14 1293.01,-1869.49 1285.16,-1885.63"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="1281.84,-1884.44 1280.47,-1894.94 1288.09,-1887.58 1281.84,-1884.44"></polygon>
+</a>
+</g>
+<g id="a_edge60-label"><a xlink:title="io.copyBuffer ... io.Copy (516.01kB)">
+<text text-anchor="middle" x="1348.5" y="-1779.8" font-family="Times,serif" font-size="14.00"> 516.01kB</text>
+<text text-anchor="middle" x="1348.5" y="-1764.8" font-family="Times,serif" font-size="14.00"> (inline)</text>
+</a>
+</g>
+</g>
+<!-- N20 -->
+<g id="node20" class="node">
+<title>N20</title>
+<g id="a_node20"><a xlink:title="runtime.mstart (1026kB)">
+<polygon fill="#ede7e1" stroke="#b28559" points="1405,-2567 1301,-2567 1301,-2531 1405,-2531 1405,-2567"></polygon>
+<text text-anchor="middle" x="1353" y="-2556.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="1353" y="-2547.1" font-family="Times,serif" font-size="8.00">mstart</text>
+<text text-anchor="middle" x="1353" y="-2538.1" font-family="Times,serif" font-size="8.00">0 of 1026kB (10.02%)</text>
+</a>
+</g>
+</g>
+<!-- N20&#45;&gt;N15 -->
+<g id="edge47" class="edge">
+<title>N20-&gt;N15</title>
+<g id="a_edge47"><a xlink:title="runtime.mstart ... runtime.schedule (1026kB)">
+<path fill="none" stroke="#b28559" stroke-dasharray="1,5" d="M1353,-2530.99C1353,-2511.92 1353,-2480.75 1353,-2458.28"></path>
+<polygon fill="#b28559" stroke="#b28559" points="1356.5,-2458.03 1353,-2448.03 1349.5,-2458.03 1356.5,-2458.03"></polygon>
+</a>
+</g>
+<g id="a_edge47-label"><a xlink:title="runtime.mstart ... runtime.schedule (1026kB)">
+<text text-anchor="middle" x="1383" y="-2481.3" font-family="Times,serif" font-size="14.00"> 1026kB</text>
+</a>
+</g>
+</g>
+<!-- NN21_0 -->
+<g id="NN21_0" class="node">
+<title>NN21_0</title>
+<g id="a_NN21_0"><a xlink:title="512.50kB">
+<polygon fill="#f8f8f8" stroke="black" points="451,-680 401,-680 397,-676 397,-644 447,-644 451,-648 451,-680"></polygon>
+<polyline fill="none" stroke="black" points="447,-676 397,-676 "></polyline>
+<polyline fill="none" stroke="black" points="447,-676 447,-644 "></polyline>
+<polyline fill="none" stroke="black" points="447,-676 451,-680 "></polyline>
+<text text-anchor="middle" x="424" y="-660.1" font-family="Times,serif" font-size="8.00">1kB</text>
+</a>
+</g>
+</g>
+<!-- N21&#45;&gt;NN21_0 -->
+<g id="edge9" class="edge">
+<title>N21-&gt;NN21_0</title>
+<g id="a_edge9"><a xlink:title="512.50kB">
+<path fill="none" stroke="black" d="M424,-756.96C424,-736.25 424,-709.87 424,-690.34"></path>
+<polygon fill="black" stroke="black" points="427.5,-690.27 424,-680.27 420.5,-690.27 427.5,-690.27"></polygon>
+</a>
+</g>
+<g id="a_edge9-label"><a xlink:title="512.50kB">
+<text text-anchor="middle" x="460.5" y="-727.8" font-family="Times,serif" font-size="14.00"> 512.50kB</text>
+</a>
+</g>
+</g>
+<!-- N22 -->
+<g id="node22" class="node">
+<title>N22</title>
+<g id="a_node22"><a xlink:title="net.newRequest (512.28kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="1686,-2220 1506,-2220 1506,-2152 1686,-2152 1686,-2220"></polygon>
+<text text-anchor="middle" x="1596" y="-2201.6" font-family="Times,serif" font-size="18.00">net</text>
+<text text-anchor="middle" x="1596" y="-2181.6" font-family="Times,serif" font-size="18.00">newRequest</text>
+<text text-anchor="middle" x="1596" y="-2161.6" font-family="Times,serif" font-size="18.00">512.28kB (5.00%)</text>
+</a>
+</g>
+</g>
+<!-- NN22_0 -->
+<g id="NN22_0" class="node">
+<title>NN22_0</title>
+<g id="a_NN22_0"><a xlink:title="512.28kB">
+<polygon fill="#f8f8f8" stroke="black" points="1623,-2075 1573,-2075 1569,-2071 1569,-2039 1619,-2039 1623,-2043 1623,-2075"></polygon>
+<polyline fill="none" stroke="black" points="1619,-2071 1569,-2071 "></polyline>
+<polyline fill="none" stroke="black" points="1619,-2071 1619,-2039 "></polyline>
+<polyline fill="none" stroke="black" points="1619,-2071 1623,-2075 "></polyline>
+<text text-anchor="middle" x="1596" y="-2055.1" font-family="Times,serif" font-size="8.00">576B</text>
+</a>
+</g>
+</g>
+<!-- N22&#45;&gt;NN22_0 -->
+<g id="edge10" class="edge">
+<title>N22-&gt;NN22_0</title>
+<g id="a_edge10"><a xlink:title="512.28kB">
+<path fill="none" stroke="black" d="M1596,-2151.96C1596,-2131.25 1596,-2104.87 1596,-2085.34"></path>
+<polygon fill="black" stroke="black" points="1599.5,-2085.27 1596,-2075.27 1592.5,-2085.27 1599.5,-2085.27"></polygon>
+</a>
+</g>
+<g id="a_edge10-label"><a xlink:title="512.28kB">
+<text text-anchor="middle" x="1632.5" y="-2122.8" font-family="Times,serif" font-size="14.00"> 512.28kB</text>
+</a>
+</g>
+</g>
+<!-- NN23_0 -->
+<g id="NN23_0" class="node">
+<title>NN23_0</title>
+<g id="a_NN23_0"><a xlink:title="512.05kB">
+<polygon fill="#f8f8f8" stroke="black" points="259,-355 209,-355 205,-351 205,-319 255,-319 259,-323 259,-355"></polygon>
+<polyline fill="none" stroke="black" points="255,-351 205,-351 "></polyline>
+<polyline fill="none" stroke="black" points="255,-351 255,-319 "></polyline>
+<polyline fill="none" stroke="black" points="255,-351 259,-355 "></polyline>
+<text text-anchor="middle" x="232" y="-335.1" font-family="Times,serif" font-size="8.00">96B</text>
+</a>
+</g>
+</g>
+<!-- N23&#45;&gt;NN23_0 -->
+<g id="edge11" class="edge">
+<title>N23-&gt;NN23_0</title>
+<g id="a_edge11"><a xlink:title="512.05kB">
+<path fill="none" stroke="black" d="M232,-416C232,-399.95 232,-380.89 232,-365.62"></path>
+<polygon fill="black" stroke="black" points="235.5,-365.28 232,-355.28 228.5,-365.28 235.5,-365.28"></polygon>
+</a>
+</g>
+<g id="a_edge11-label"><a xlink:title="512.05kB">
+<text text-anchor="middle" x="268.5" y="-376.8" font-family="Times,serif" font-size="14.00"> 512.05kB</text>
+</a>
+</g>
+</g>
+<!-- NN24_0 -->
+<g id="NN24_0" class="node">
+<title>NN24_0</title>
+<g id="a_NN24_0"><a xlink:title="512.05kB">
+<polygon fill="#f8f8f8" stroke="black" points="667,-1794 617,-1794 613,-1790 613,-1758 663,-1758 667,-1762 667,-1794"></polygon>
+<polyline fill="none" stroke="black" points="663,-1790 613,-1790 "></polyline>
+<polyline fill="none" stroke="black" points="663,-1790 663,-1758 "></polyline>
+<polyline fill="none" stroke="black" points="663,-1790 667,-1794 "></polyline>
+<text text-anchor="middle" x="640" y="-1774.1" font-family="Times,serif" font-size="8.00">96B</text>
+</a>
+</g>
+</g>
+<!-- N24&#45;&gt;NN24_0 -->
+<g id="edge12" class="edge">
+<title>N24-&gt;NN24_0</title>
+<g id="a_edge12"><a xlink:title="512.05kB">
+<path fill="none" stroke="black" d="M640,-1878.98C640,-1856 640,-1825.75 640,-1804.17"></path>
+<polygon fill="black" stroke="black" points="643.5,-1804.06 640,-1794.06 636.5,-1804.06 643.5,-1804.06"></polygon>
+</a>
+</g>
+<g id="a_edge12-label"><a xlink:title="512.05kB">
+<text text-anchor="middle" x="676.5" y="-1849.8" font-family="Times,serif" font-size="14.00"> 512.05kB</text>
+</a>
+</g>
+</g>
+<!-- NN25_0 -->
+<g id="NN25_0" class="node">
+<title>NN25_0</title>
+<g id="a_NN25_0"><a xlink:title="512.04kB">
+<polygon fill="#f8f8f8" stroke="black" points="481,-355 431,-355 427,-351 427,-319 477,-319 481,-323 481,-355"></polygon>
+<polyline fill="none" stroke="black" points="477,-351 427,-351 "></polyline>
+<polyline fill="none" stroke="black" points="477,-351 477,-319 "></polyline>
+<polyline fill="none" stroke="black" points="477,-351 481,-355 "></polyline>
+<text text-anchor="middle" x="454" y="-335.1" font-family="Times,serif" font-size="8.00">80B</text>
+</a>
+</g>
+</g>
+<!-- N25&#45;&gt;NN25_0 -->
+<g id="edge13" class="edge">
+<title>N25-&gt;NN25_0</title>
+<g id="a_edge13"><a xlink:title="512.04kB">
+<path fill="none" stroke="black" d="M454,-405.77C454,-392.25 454,-377.71 454,-365.58"></path>
+<polygon fill="black" stroke="black" points="457.5,-365.22 454,-355.22 450.5,-365.22 457.5,-365.22"></polygon>
+</a>
+</g>
+<g id="a_edge13-label"><a xlink:title="512.04kB">
+<text text-anchor="middle" x="490.5" y="-376.8" font-family="Times,serif" font-size="14.00"> 512.04kB</text>
+</a>
+</g>
+</g>
+<!-- N26 -->
+<g id="node26" class="node">
+<title>N26</title>
+<g id="a_node26"><a xlink:title="os.newUnixDirent (512.03kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="180,-825 0,-825 0,-757 180,-757 180,-825"></polygon>
+<text text-anchor="middle" x="90" y="-806.6" font-family="Times,serif" font-size="18.00">os</text>
+<text text-anchor="middle" x="90" y="-786.6" font-family="Times,serif" font-size="18.00">newUnixDirent</text>
+<text text-anchor="middle" x="90" y="-766.6" font-family="Times,serif" font-size="18.00">512.03kB (5.00%)</text>
+</a>
+</g>
+</g>
+<!-- NN26_0 -->
+<g id="NN26_0" class="node">
+<title>NN26_0</title>
+<g id="a_NN26_0"><a xlink:title="512.03kB">
+<polygon fill="#f8f8f8" stroke="black" points="117,-680 67,-680 63,-676 63,-644 113,-644 117,-648 117,-680"></polygon>
+<polyline fill="none" stroke="black" points="113,-676 63,-676 "></polyline>
+<polyline fill="none" stroke="black" points="113,-676 113,-644 "></polyline>
+<polyline fill="none" stroke="black" points="113,-676 117,-680 "></polyline>
+<text text-anchor="middle" x="90" y="-660.1" font-family="Times,serif" font-size="8.00">64B</text>
+</a>
+</g>
+</g>
+<!-- N26&#45;&gt;NN26_0 -->
+<g id="edge14" class="edge">
+<title>N26-&gt;NN26_0</title>
+<g id="a_edge14"><a xlink:title="512.03kB">
+<path fill="none" stroke="black" d="M90,-756.96C90,-736.25 90,-709.87 90,-690.34"></path>
+<polygon fill="black" stroke="black" points="93.5,-690.27 90,-680.27 86.5,-690.27 93.5,-690.27"></polygon>
+</a>
+</g>
+<g id="a_edge14-label"><a xlink:title="512.03kB">
+<text text-anchor="middle" x="126.5" y="-727.8" font-family="Times,serif" font-size="14.00"> 512.03kB</text>
+</a>
+</g>
+</g>
+<!-- N27 -->
+<g id="node27" class="node">
+<title>N27</title>
+<g id="a_node27"><a xlink:title="crypto/internal/fips140/nistec.NewP384Point (512.02kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="729,-155 549,-155 549,-87 729,-87 729,-155"></polygon>
+<text text-anchor="middle" x="639" y="-136.6" font-family="Times,serif" font-size="18.00">nistec</text>
+<text text-anchor="middle" x="639" y="-116.6" font-family="Times,serif" font-size="18.00">NewP384Point</text>
+<text text-anchor="middle" x="639" y="-96.6" font-family="Times,serif" font-size="18.00">512.02kB (5.00%)</text>
+</a>
+</g>
+</g>
+<!-- NN27_0 -->
+<g id="NN27_0" class="node">
+<title>NN27_0</title>
+<g id="a_NN27_0"><a xlink:title="512.02kB">
+<polygon fill="#f8f8f8" stroke="black" points="666,-36 616,-36 612,-32 612,0 662,0 666,-4 666,-36"></polygon>
+<polyline fill="none" stroke="black" points="662,-32 612,-32 "></polyline>
+<polyline fill="none" stroke="black" points="662,-32 662,0 "></polyline>
+<polyline fill="none" stroke="black" points="662,-32 666,-36 "></polyline>
+<text text-anchor="middle" x="639" y="-16.1" font-family="Times,serif" font-size="8.00">48B</text>
+</a>
+</g>
+</g>
+<!-- N27&#45;&gt;NN27_0 -->
+<g id="edge15" class="edge">
+<title>N27-&gt;NN27_0</title>
+<g id="a_edge15"><a xlink:title="512.02kB">
+<path fill="none" stroke="black" d="M639,-86.93C639,-73.85 639,-58.99 639,-46.51"></path>
+<polygon fill="black" stroke="black" points="642.5,-46.26 639,-36.26 635.5,-46.26 642.5,-46.26"></polygon>
+</a>
+</g>
+<g id="a_edge15-label"><a xlink:title="512.02kB">
+<text text-anchor="middle" x="675.5" y="-57.8" font-family="Times,serif" font-size="14.00"> 512.02kB</text>
+</a>
+</g>
+</g>
+<!-- N28 -->
+<g id="node28" class="node">
+<title>N28</title>
+<g id="a_node28"><a xlink:title="strings.(*Builder).grow (512.01kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="1199,-2101 1019,-2101 1019,-2013 1199,-2013 1199,-2101"></polygon>
+<text text-anchor="middle" x="1109" y="-2082.6" font-family="Times,serif" font-size="18.00">strings</text>
+<text text-anchor="middle" x="1109" y="-2062.6" font-family="Times,serif" font-size="18.00">(*Builder)</text>
+<text text-anchor="middle" x="1109" y="-2042.6" font-family="Times,serif" font-size="18.00">grow</text>
+<text text-anchor="middle" x="1109" y="-2022.6" font-family="Times,serif" font-size="18.00">512.01kB (5.00%)</text>
+</a>
+</g>
+</g>
+<!-- NN28_0 -->
+<g id="NN28_0" class="node">
+<title>NN28_0</title>
+<g id="a_NN28_0"><a xlink:title="512.01kB">
+<polygon fill="#f8f8f8" stroke="black" points="1136,-1931 1086,-1931 1082,-1927 1082,-1895 1132,-1895 1136,-1899 1136,-1931"></polygon>
+<polyline fill="none" stroke="black" points="1132,-1927 1082,-1927 "></polyline>
+<polyline fill="none" stroke="black" points="1132,-1927 1132,-1895 "></polyline>
+<polyline fill="none" stroke="black" points="1132,-1927 1136,-1931 "></polyline>
+<text text-anchor="middle" x="1109" y="-1911.1" font-family="Times,serif" font-size="8.00">24B</text>
+</a>
+</g>
+</g>
+<!-- N28&#45;&gt;NN28_0 -->
+<g id="edge16" class="edge">
+<title>N28-&gt;NN28_0</title>
+<g id="a_edge16"><a xlink:title="512.01kB">
+<path fill="none" stroke="black" d="M1109,-2012.62C1109,-1989.39 1109,-1961.49 1109,-1941.3"></path>
+<polygon fill="black" stroke="black" points="1112.5,-1941.23 1109,-1931.23 1105.5,-1941.23 1112.5,-1941.23"></polygon>
+</a>
+</g>
+<g id="a_edge16-label"><a xlink:title="512.01kB">
+<text text-anchor="middle" x="1145.5" y="-1976.3" font-family="Times,serif" font-size="14.00"> 512.01kB</text>
+</a>
+</g>
+</g>
+<!-- N29&#45;&gt;N19 -->
+<g id="edge58" class="edge">
+<title>N29-&gt;N19</title>
+<g id="a_edge58"><a xlink:title="io.Copy -&gt; io.copyBuffer (516.01kB)">
+<path fill="none" stroke="#b2a085" d="M1260.54,-1894.73C1251.22,-1878.26 1238.26,-1852.41 1233,-1828 1223.26,-1782.82 1225.18,-1769.56 1233,-1724 1237.11,-1700.1 1245.76,-1674.54 1253.98,-1653.78"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="1257.3,-1654.89 1257.83,-1644.31 1250.82,-1652.26 1257.3,-1654.89"></polygon>
+</a>
+</g>
+<g id="a_edge58-label"><a xlink:title="io.Copy -&gt; io.copyBuffer (516.01kB)">
+<text text-anchor="middle" x="1269.5" y="-1772.3" font-family="Times,serif" font-size="14.00"> 516.01kB</text>
+</a>
+</g>
+</g>
+<!-- N30 -->
+<g id="node30" class="node">
+<title>N30</title>
+<g id="a_node30"><a xlink:title="runtime.mcall (513kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="1517,-2567 1423,-2567 1423,-2531 1517,-2531 1517,-2567"></polygon>
+<text text-anchor="middle" x="1470" y="-2556.1" font-family="Times,serif" font-size="8.00">runtime</text>
+<text text-anchor="middle" x="1470" y="-2547.1" font-family="Times,serif" font-size="8.00">mcall</text>
+<text text-anchor="middle" x="1470" y="-2538.1" font-family="Times,serif" font-size="8.00">0 of 513kB (5.01%)</text>
+</a>
+</g>
+</g>
+<!-- N30&#45;&gt;N15 -->
+<g id="edge63" class="edge">
+<title>N30-&gt;N15</title>
+<g id="a_edge63"><a xlink:title="runtime.mcall ... runtime.schedule (513kB)">
+<path fill="none" stroke="#b2a085" stroke-dasharray="1,5" d="M1461.24,-2530.94C1451.94,-2514.01 1435.98,-2488.06 1417,-2470 1410.7,-2464 1403.33,-2458.48 1395.87,-2453.59"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="1397.48,-2450.47 1387.14,-2448.15 1393.77,-2456.41 1397.48,-2450.47"></polygon>
+</a>
+</g>
+<g id="a_edge63-label"><a xlink:title="runtime.mcall ... runtime.schedule (513kB)">
+<text text-anchor="middle" x="1467.5" y="-2481.3" font-family="Times,serif" font-size="14.00"> 513kB</text>
+</a>
+</g>
+</g>
+<!-- N31 -->
+<g id="node31" class="node">
+<title>N31</title>
+<g id="a_node31"><a xlink:title="net.(*Resolver).goLookupIPCNAMEOrder.func3.1 (512.28kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="1656.5,-2580 1535.5,-2580 1535.5,-2518 1656.5,-2518 1656.5,-2580"></polygon>
+<text text-anchor="middle" x="1596" y="-2569.6" font-family="Times,serif" font-size="8.00">net</text>
+<text text-anchor="middle" x="1596" y="-2560.6" font-family="Times,serif" font-size="8.00">(*Resolver)</text>
+<text text-anchor="middle" x="1596" y="-2551.6" font-family="Times,serif" font-size="8.00">goLookupIPCNAMEOrder</text>
+<text text-anchor="middle" x="1596" y="-2542.6" font-family="Times,serif" font-size="8.00">func3</text>
+<text text-anchor="middle" x="1596" y="-2533.6" font-family="Times,serif" font-size="8.00">1</text>
+<text text-anchor="middle" x="1596" y="-2524.6" font-family="Times,serif" font-size="8.00">0 of 512.28kB (5.00%)</text>
+</a>
+</g>
+</g>
+<!-- N60 -->
+<g id="node60" class="node">
+<title>N60</title>
+<g id="a_node60"><a xlink:title="net.(*Resolver).tryOneName (512.28kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="1649.5,-2452 1542.5,-2452 1542.5,-2408 1649.5,-2408 1649.5,-2452"></polygon>
+<text text-anchor="middle" x="1596" y="-2441.6" font-family="Times,serif" font-size="8.00">net</text>
+<text text-anchor="middle" x="1596" y="-2432.6" font-family="Times,serif" font-size="8.00">(*Resolver)</text>
+<text text-anchor="middle" x="1596" y="-2423.6" font-family="Times,serif" font-size="8.00">tryOneName</text>
+<text text-anchor="middle" x="1596" y="-2414.6" font-family="Times,serif" font-size="8.00">0 of 512.28kB (5.00%)</text>
+</a>
+</g>
+</g>
+<!-- N31&#45;&gt;N60 -->
+<g id="edge66" class="edge">
+<title>N31-&gt;N60</title>
+<g id="a_edge66"><a xlink:title="net.(*Resolver).goLookupIPCNAMEOrder.func3.1 -&gt; net.(*Resolver).tryOneName (512.28kB)">
+<path fill="none" stroke="#b2a085" d="M1596,-2517.87C1596,-2500.82 1596,-2479.54 1596,-2462.3"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="1599.5,-2462.17 1596,-2452.17 1592.5,-2462.17 1599.5,-2462.17"></polygon>
+</a>
+</g>
+<g id="a_edge66-label"><a xlink:title="net.(*Resolver).goLookupIPCNAMEOrder.func3.1 -&gt; net.(*Resolver).tryOneName (512.28kB)">
+<text text-anchor="middle" x="1632.5" y="-2481.3" font-family="Times,serif" font-size="14.00"> 512.28kB</text>
+</a>
+</g>
+</g>
+<!-- N32&#45;&gt;N16 -->
+<g id="edge48" class="edge">
+<title>N32-&gt;N16</title>
+<g id="a_edge48"><a xlink:title="compress/flate.(*compressor).init -&gt; compress/flate.(*compressor).initDeflate (548.84kB)">
+<path fill="none" stroke="#b29e82" d="M895,-1124.82C895,-1109.75 895,-1088.8 895,-1069.29"></path>
+<polygon fill="#b29e82" stroke="#b29e82" points="898.5,-1069.27 895,-1059.27 891.5,-1069.27 898.5,-1069.27"></polygon>
+</a>
+</g>
+<g id="a_edge48-label"><a xlink:title="compress/flate.(*compressor).init -&gt; compress/flate.(*compressor).initDeflate (548.84kB)">
+<text text-anchor="middle" x="931.5" y="-1095.8" font-family="Times,serif" font-size="14.00"> 548.84kB</text>
+<text text-anchor="middle" x="931.5" y="-1080.8" font-family="Times,serif" font-size="14.00"> (inline)</text>
+</a>
+</g>
+</g>
+<!-- N33 -->
+<g id="node33" class="node">
+<title>N33</title>
+<g id="a_node33"><a xlink:title="compress/flate.NewWriterDict (1451.43kB)">
+<polygon fill="#ede3dc" stroke="#b26c33" points="865.5,-1521 748.5,-1521 748.5,-1485 865.5,-1485 865.5,-1521"></polygon>
+<text text-anchor="middle" x="807" y="-1510.1" font-family="Times,serif" font-size="8.00">flate</text>
+<text text-anchor="middle" x="807" y="-1501.1" font-family="Times,serif" font-size="8.00">NewWriterDict</text>
+<text text-anchor="middle" x="807" y="-1492.1" font-family="Times,serif" font-size="8.00">0 of 1451.43kB (14.18%)</text>
+</a>
+</g>
+</g>
+<!-- N33&#45;&gt;N8 -->
+<g id="edge37" class="edge">
+<title>N33-&gt;N8</title>
+<g id="a_edge37"><a xlink:title="compress/flate.NewWriterDict -&gt; compress/flate.NewWriter (1451.43kB)">
+<path fill="none" stroke="#b26c33" d="M807,-1484.78C807,-1469.72 807,-1446.95 807,-1425.36"></path>
+<polygon fill="#b26c33" stroke="#b26c33" points="810.5,-1425.23 807,-1415.23 803.5,-1425.23 810.5,-1425.23"></polygon>
+</a>
+</g>
+<g id="a_edge37-label"><a xlink:title="compress/flate.NewWriterDict -&gt; compress/flate.NewWriter (1451.43kB)">
+<text text-anchor="middle" x="848" y="-1451.8" font-family="Times,serif" font-size="14.00"> 1451.43kB</text>
+<text text-anchor="middle" x="848" y="-1436.8" font-family="Times,serif" font-size="14.00"> (inline)</text>
+</a>
+</g>
+</g>
+<!-- N34 -->
+<g id="node34" class="node">
+<title>N34</title>
+<g id="a_node34"><a xlink:title="compress/zlib.(*Writer).Write (1451.43kB)">
+<polygon fill="#ede3dc" stroke="#b26c33" points="865.5,-1798 748.5,-1798 748.5,-1754 865.5,-1754 865.5,-1798"></polygon>
+<text text-anchor="middle" x="807" y="-1787.6" font-family="Times,serif" font-size="8.00">zlib</text>
+<text text-anchor="middle" x="807" y="-1778.6" font-family="Times,serif" font-size="8.00">(*Writer)</text>
+<text text-anchor="middle" x="807" y="-1769.6" font-family="Times,serif" font-size="8.00">Write</text>
+<text text-anchor="middle" x="807" y="-1760.6" font-family="Times,serif" font-size="8.00">0 of 1451.43kB (14.18%)</text>
+</a>
+</g>
+</g>
+<!-- N35 -->
+<g id="node35" class="node">
+<title>N35</title>
+<g id="a_node35"><a xlink:title="compress/zlib.(*Writer).writeHeader (1451.43kB)">
+<polygon fill="#ede3dc" stroke="#b26c33" points="865.5,-1632 748.5,-1632 748.5,-1588 865.5,-1588 865.5,-1632"></polygon>
+<text text-anchor="middle" x="807" y="-1621.6" font-family="Times,serif" font-size="8.00">zlib</text>
+<text text-anchor="middle" x="807" y="-1612.6" font-family="Times,serif" font-size="8.00">(*Writer)</text>
+<text text-anchor="middle" x="807" y="-1603.6" font-family="Times,serif" font-size="8.00">writeHeader</text>
+<text text-anchor="middle" x="807" y="-1594.6" font-family="Times,serif" font-size="8.00">0 of 1451.43kB (14.18%)</text>
+</a>
+</g>
+</g>
+<!-- N34&#45;&gt;N35 -->
+<g id="edge38" class="edge">
+<title>N34-&gt;N35</title>
+<g id="a_edge38"><a xlink:title="compress/zlib.(*Writer).Write -&gt; compress/zlib.(*Writer).writeHeader (1451.43kB)">
+<path fill="none" stroke="#b26c33" d="M807,-1753.9C807,-1725.6 807,-1675.16 807,-1642.4"></path>
+<polygon fill="#b26c33" stroke="#b26c33" points="810.5,-1642.02 807,-1632.02 803.5,-1642.02 810.5,-1642.02"></polygon>
+</a>
+</g>
+<g id="a_edge38-label"><a xlink:title="compress/zlib.(*Writer).Write -&gt; compress/zlib.(*Writer).writeHeader (1451.43kB)">
+<text text-anchor="middle" x="848" y="-1680.3" font-family="Times,serif" font-size="14.00"> 1451.43kB</text>
+</a>
+</g>
+</g>
+<!-- N35&#45;&gt;N33 -->
+<g id="edge39" class="edge">
+<title>N35-&gt;N33</title>
+<g id="a_edge39"><a xlink:title="compress/zlib.(*Writer).writeHeader -&gt; compress/flate.NewWriterDict (1451.43kB)">
+<path fill="none" stroke="#b26c33" d="M807,-1587.75C807,-1571.47 807,-1548.9 807,-1531.28"></path>
+<polygon fill="#b26c33" stroke="#b26c33" points="810.5,-1531.06 807,-1521.06 803.5,-1531.06 810.5,-1531.06"></polygon>
+</a>
+</g>
+<g id="a_edge39-label"><a xlink:title="compress/zlib.(*Writer).writeHeader -&gt; compress/flate.NewWriterDict (1451.43kB)">
+<text text-anchor="middle" x="848" y="-1546.8" font-family="Times,serif" font-size="14.00"> 1451.43kB</text>
+</a>
+</g>
+</g>
+<!-- N36 -->
+<g id="node36" class="node">
+<title>N36</title>
+<g id="a_node36"><a xlink:title="crypto/elliptic.(*nistCurve[go.shape.*uint8]).Unmarshal (512.02kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="692.5,-268 585.5,-268 585.5,-206 692.5,-206 692.5,-268"></polygon>
+<text text-anchor="middle" x="639" y="-257.6" font-family="Times,serif" font-size="8.00">elliptic</text>
+<text text-anchor="middle" x="639" y="-248.6" font-family="Times,serif" font-size="8.00">(*nistCurve[go</text>
+<text text-anchor="middle" x="639" y="-239.6" font-family="Times,serif" font-size="8.00">shape</text>
+<text text-anchor="middle" x="639" y="-230.6" font-family="Times,serif" font-size="8.00">*uint8])</text>
+<text text-anchor="middle" x="639" y="-221.6" font-family="Times,serif" font-size="8.00">Unmarshal</text>
+<text text-anchor="middle" x="639" y="-212.6" font-family="Times,serif" font-size="8.00">0 of 512.02kB (5.00%)</text>
+</a>
+</g>
+</g>
+<!-- N36&#45;&gt;N27 -->
+<g id="edge73" class="edge">
+<title>N36-&gt;N27</title>
+<g id="a_edge73"><a xlink:title="crypto/elliptic.(*nistCurve[go.shape.*uint8]).Unmarshal -&gt; crypto/internal/fips140/nistec.NewP384Point (512.02kB)">
+<path fill="none" stroke="#b2a085" d="M639,-205.75C639,-193.34 639,-178.75 639,-165.26"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="642.5,-165.2 639,-155.2 635.5,-165.2 642.5,-165.2"></polygon>
+</a>
+</g>
+<g id="a_edge73-label"><a xlink:title="crypto/elliptic.(*nistCurve[go.shape.*uint8]).Unmarshal -&gt; crypto/internal/fips140/nistec.NewP384Point (512.02kB)">
+<text text-anchor="middle" x="675.5" y="-176.8" font-family="Times,serif" font-size="14.00"> 512.02kB</text>
+</a>
+</g>
+</g>
+<!-- N37 -->
+<g id="node37" class="node">
+<title>N37</title>
+<g id="a_node37"><a xlink:title="crypto/elliptic.Unmarshal (512.02kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="692.5,-355 585.5,-355 585.5,-319 692.5,-319 692.5,-355"></polygon>
+<text text-anchor="middle" x="639" y="-344.1" font-family="Times,serif" font-size="8.00">elliptic</text>
+<text text-anchor="middle" x="639" y="-335.1" font-family="Times,serif" font-size="8.00">Unmarshal</text>
+<text text-anchor="middle" x="639" y="-326.1" font-family="Times,serif" font-size="8.00">0 of 512.02kB (5.00%)</text>
+</a>
+</g>
+</g>
+<!-- N37&#45;&gt;N36 -->
+<g id="edge74" class="edge">
+<title>N37-&gt;N36</title>
+<g id="a_edge74"><a xlink:title="crypto/elliptic.Unmarshal -&gt; crypto/elliptic.(*nistCurve[go.shape.*uint8]).Unmarshal (512.02kB)">
+<path fill="none" stroke="#b2a085" d="M639,-318.93C639,-307.72 639,-292.56 639,-278.4"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="642.5,-278.33 639,-268.33 635.5,-278.33 642.5,-278.33"></polygon>
+</a>
+</g>
+<g id="a_edge74-label"><a xlink:title="crypto/elliptic.Unmarshal -&gt; crypto/elliptic.(*nistCurve[go.shape.*uint8]).Unmarshal (512.02kB)">
+<text text-anchor="middle" x="675.5" y="-289.8" font-family="Times,serif" font-size="14.00"> 512.02kB</text>
+</a>
+</g>
+</g>
+<!-- N40 -->
+<g id="node40" class="node">
+<title>N40</title>
+<g id="a_node40"><a xlink:title="crypto/tls.(*Conn).handshakeContext (3072.70kB)">
+<polygon fill="#eddcd5" stroke="#b23600" points="315.5,-2336 198.5,-2336 198.5,-2292 315.5,-2292 315.5,-2336"></polygon>
+<text text-anchor="middle" x="257" y="-2325.6" font-family="Times,serif" font-size="8.00">tls</text>
+<text text-anchor="middle" x="257" y="-2316.6" font-family="Times,serif" font-size="8.00">(*Conn)</text>
+<text text-anchor="middle" x="257" y="-2307.6" font-family="Times,serif" font-size="8.00">handshakeContext</text>
+<text text-anchor="middle" x="257" y="-2298.6" font-family="Times,serif" font-size="8.00">0 of 3072.70kB (30.01%)</text>
+</a>
+</g>
+</g>
+<!-- N38&#45;&gt;N40 -->
+<g id="edge20" class="edge">
+<title>N38-&gt;N40</title>
+<g id="a_edge20"><a xlink:title="crypto/tls.(*Conn).HandshakeContext -&gt; crypto/tls.(*Conn).handshakeContext (3072.70kB)">
+<path fill="none" stroke="#b23600" stroke-width="2" d="M257,-2407.82C257,-2390.55 257,-2365.89 257,-2346.33"></path>
+<polygon fill="#b23600" stroke="#b23600" stroke-width="2" points="260.5,-2346.06 257,-2336.06 253.5,-2346.06 260.5,-2346.06"></polygon>
+</a>
+</g>
+<g id="a_edge20-label"><a xlink:title="crypto/tls.(*Conn).HandshakeContext -&gt; crypto/tls.(*Conn).handshakeContext (3072.70kB)">
+<text text-anchor="middle" x="298" y="-2378.8" font-family="Times,serif" font-size="14.00"> 3072.70kB</text>
+</a>
+</g>
+</g>
+<!-- N39 -->
+<g id="node39" class="node">
+<title>N39</title>
+<g id="a_node39"><a xlink:title="crypto/tls.(*Conn).clientHandshake (3072.70kB)">
+<polygon fill="#eddcd5" stroke="#b23600" points="315.5,-2208 198.5,-2208 198.5,-2164 315.5,-2164 315.5,-2208"></polygon>
+<text text-anchor="middle" x="257" y="-2197.6" font-family="Times,serif" font-size="8.00">tls</text>
+<text text-anchor="middle" x="257" y="-2188.6" font-family="Times,serif" font-size="8.00">(*Conn)</text>
+<text text-anchor="middle" x="257" y="-2179.6" font-family="Times,serif" font-size="8.00">clientHandshake</text>
+<text text-anchor="middle" x="257" y="-2170.6" font-family="Times,serif" font-size="8.00">0 of 3072.70kB (30.01%)</text>
+</a>
+</g>
+</g>
+<!-- N42 -->
+<g id="node42" class="node">
+<title>N42</title>
+<g id="a_node42"><a xlink:title="crypto/tls.(*clientHandshakeStateTLS13).handshake (3072.70kB)">
+<polygon fill="#eddcd5" stroke="#b23600" points="326.5,-2079 187.5,-2079 187.5,-2035 326.5,-2035 326.5,-2079"></polygon>
+<text text-anchor="middle" x="257" y="-2068.6" font-family="Times,serif" font-size="8.00">tls</text>
+<text text-anchor="middle" x="257" y="-2059.6" font-family="Times,serif" font-size="8.00">(*clientHandshakeStateTLS13)</text>
+<text text-anchor="middle" x="257" y="-2050.6" font-family="Times,serif" font-size="8.00">handshake</text>
+<text text-anchor="middle" x="257" y="-2041.6" font-family="Times,serif" font-size="8.00">0 of 3072.70kB (30.01%)</text>
+</a>
+</g>
+</g>
+<!-- N39&#45;&gt;N42 -->
+<g id="edge21" class="edge">
+<title>N39-&gt;N42</title>
+<g id="a_edge21"><a xlink:title="crypto/tls.(*Conn).clientHandshake -&gt; crypto/tls.(*clientHandshakeStateTLS13).handshake (3072.70kB)">
+<path fill="none" stroke="#b23600" stroke-width="2" d="M257,-2163.74C257,-2143.41 257,-2112.51 257,-2089.35"></path>
+<polygon fill="#b23600" stroke="#b23600" stroke-width="2" points="260.5,-2089.33 257,-2079.33 253.5,-2089.33 260.5,-2089.33"></polygon>
+</a>
+</g>
+<g id="a_edge21-label"><a xlink:title="crypto/tls.(*Conn).clientHandshake -&gt; crypto/tls.(*clientHandshakeStateTLS13).handshake (3072.70kB)">
+<text text-anchor="middle" x="298" y="-2122.8" font-family="Times,serif" font-size="14.00"> 3072.70kB</text>
+</a>
+</g>
+</g>
+<!-- N40&#45;&gt;N39 -->
+<g id="edge22" class="edge">
+<title>N40-&gt;N39</title>
+<g id="a_edge22"><a xlink:title="crypto/tls.(*Conn).handshakeContext -&gt; crypto/tls.(*Conn).clientHandshake (3072.70kB)">
+<path fill="none" stroke="#b23600" stroke-width="2" d="M257,-2291.91C257,-2271.83 257,-2241.36 257,-2218.42"></path>
+<polygon fill="#b23600" stroke="#b23600" stroke-width="2" points="260.5,-2218.16 257,-2208.16 253.5,-2218.16 260.5,-2218.16"></polygon>
+</a>
+</g>
+<g id="a_edge22-label"><a xlink:title="crypto/tls.(*Conn).handshakeContext -&gt; crypto/tls.(*Conn).clientHandshake (3072.70kB)">
+<text text-anchor="middle" x="298" y="-2241.8" font-family="Times,serif" font-size="14.00"> 3072.70kB</text>
+</a>
+</g>
+</g>
+<!-- N41 -->
+<g id="node41" class="node">
+<title>N41</title>
+<g id="a_node41"><a xlink:title="crypto/tls.(*Conn).verifyServerCertificate (3072.70kB)">
+<polygon fill="#eddcd5" stroke="#b23600" points="315.5,-1798 198.5,-1798 198.5,-1754 315.5,-1754 315.5,-1798"></polygon>
+<text text-anchor="middle" x="257" y="-1787.6" font-family="Times,serif" font-size="8.00">tls</text>
+<text text-anchor="middle" x="257" y="-1778.6" font-family="Times,serif" font-size="8.00">(*Conn)</text>
+<text text-anchor="middle" x="257" y="-1769.6" font-family="Times,serif" font-size="8.00">verifyServerCertificate</text>
+<text text-anchor="middle" x="257" y="-1760.6" font-family="Times,serif" font-size="8.00">0 of 3072.70kB (30.01%)</text>
+</a>
+</g>
+</g>
+<!-- N44 -->
+<g id="node44" class="node">
+<title>N44</title>
+<g id="a_node44"><a xlink:title="crypto/x509.(*Certificate).Verify (3072.70kB)">
+<polygon fill="#eddcd5" stroke="#b23600" points="315.5,-1632 198.5,-1632 198.5,-1588 315.5,-1588 315.5,-1632"></polygon>
+<text text-anchor="middle" x="257" y="-1621.6" font-family="Times,serif" font-size="8.00">x509</text>
+<text text-anchor="middle" x="257" y="-1612.6" font-family="Times,serif" font-size="8.00">(*Certificate)</text>
+<text text-anchor="middle" x="257" y="-1603.6" font-family="Times,serif" font-size="8.00">Verify</text>
+<text text-anchor="middle" x="257" y="-1594.6" font-family="Times,serif" font-size="8.00">0 of 3072.70kB (30.01%)</text>
+</a>
+</g>
+</g>
+<!-- N41&#45;&gt;N44 -->
+<g id="edge23" class="edge">
+<title>N41-&gt;N44</title>
+<g id="a_edge23"><a xlink:title="crypto/tls.(*Conn).verifyServerCertificate -&gt; crypto/x509.(*Certificate).Verify (3072.70kB)">
+<path fill="none" stroke="#b23600" stroke-width="2" d="M257,-1753.9C257,-1725.6 257,-1675.16 257,-1642.4"></path>
+<polygon fill="#b23600" stroke="#b23600" stroke-width="2" points="260.5,-1642.02 257,-1632.02 253.5,-1642.02 260.5,-1642.02"></polygon>
+</a>
+</g>
+<g id="a_edge23-label"><a xlink:title="crypto/tls.(*Conn).verifyServerCertificate -&gt; crypto/x509.(*Certificate).Verify (3072.70kB)">
+<text text-anchor="middle" x="298" y="-1680.3" font-family="Times,serif" font-size="14.00"> 3072.70kB</text>
+</a>
+</g>
+</g>
+<!-- N43 -->
+<g id="node43" class="node">
+<title>N43</title>
+<g id="a_node43"><a xlink:title="crypto/tls.(*clientHandshakeStateTLS13).readServerCertificate (3072.70kB)">
+<polygon fill="#eddcd5" stroke="#b23600" points="326.5,-1935 187.5,-1935 187.5,-1891 326.5,-1891 326.5,-1935"></polygon>
+<text text-anchor="middle" x="257" y="-1924.6" font-family="Times,serif" font-size="8.00">tls</text>
+<text text-anchor="middle" x="257" y="-1915.6" font-family="Times,serif" font-size="8.00">(*clientHandshakeStateTLS13)</text>
+<text text-anchor="middle" x="257" y="-1906.6" font-family="Times,serif" font-size="8.00">readServerCertificate</text>
+<text text-anchor="middle" x="257" y="-1897.6" font-family="Times,serif" font-size="8.00">0 of 3072.70kB (30.01%)</text>
+</a>
+</g>
+</g>
+<!-- N42&#45;&gt;N43 -->
+<g id="edge24" class="edge">
+<title>N42-&gt;N43</title>
+<g id="a_edge24"><a xlink:title="crypto/tls.(*clientHandshakeStateTLS13).handshake -&gt; crypto/tls.(*clientHandshakeStateTLS13).readServerCertificate (3072.70kB)">
+<path fill="none" stroke="#b23600" stroke-width="2" d="M257,-2034.74C257,-2011.11 257,-1972.7 257,-1945.56"></path>
+<polygon fill="#b23600" stroke="#b23600" stroke-width="2" points="260.5,-1945.4 257,-1935.4 253.5,-1945.4 260.5,-1945.4"></polygon>
+</a>
+</g>
+<g id="a_edge24-label"><a xlink:title="crypto/tls.(*clientHandshakeStateTLS13).handshake -&gt; crypto/tls.(*clientHandshakeStateTLS13).readServerCertificate (3072.70kB)">
+<text text-anchor="middle" x="298" y="-1976.3" font-family="Times,serif" font-size="14.00"> 3072.70kB</text>
+</a>
+</g>
+</g>
+<!-- N43&#45;&gt;N41 -->
+<g id="edge25" class="edge">
+<title>N43-&gt;N41</title>
+<g id="a_edge25"><a xlink:title="crypto/tls.(*clientHandshakeStateTLS13).readServerCertificate -&gt; crypto/tls.(*Conn).verifyServerCertificate (3072.70kB)">
+<path fill="none" stroke="#b23600" stroke-width="2" d="M257,-1890.91C257,-1868.84 257,-1833.96 257,-1808.61"></path>
+<polygon fill="#b23600" stroke="#b23600" stroke-width="2" points="260.5,-1808.39 257,-1798.39 253.5,-1808.39 260.5,-1808.39"></polygon>
+</a>
+</g>
+<g id="a_edge25-label"><a xlink:title="crypto/tls.(*clientHandshakeStateTLS13).readServerCertificate -&gt; crypto/tls.(*Conn).verifyServerCertificate (3072.70kB)">
+<text text-anchor="middle" x="298" y="-1849.8" font-family="Times,serif" font-size="14.00"> 3072.70kB</text>
+</a>
+</g>
+</g>
+<!-- N49 -->
+<g id="node49" class="node">
+<title>N49</title>
+<g id="a_node49"><a xlink:title="crypto/x509.systemRootsPool (3072.70kB)">
+<polygon fill="#eddcd5" stroke="#b23600" points="315.5,-1521 198.5,-1521 198.5,-1485 315.5,-1485 315.5,-1521"></polygon>
+<text text-anchor="middle" x="257" y="-1510.1" font-family="Times,serif" font-size="8.00">x509</text>
+<text text-anchor="middle" x="257" y="-1501.1" font-family="Times,serif" font-size="8.00">systemRootsPool</text>
+<text text-anchor="middle" x="257" y="-1492.1" font-family="Times,serif" font-size="8.00">0 of 3072.70kB (30.01%)</text>
+</a>
+</g>
+</g>
+<!-- N44&#45;&gt;N49 -->
+<g id="edge26" class="edge">
+<title>N44-&gt;N49</title>
+<g id="a_edge26"><a xlink:title="crypto/x509.(*Certificate).Verify -&gt; crypto/x509.systemRootsPool (3072.70kB)">
+<path fill="none" stroke="#b23600" stroke-width="2" d="M257,-1587.75C257,-1571.47 257,-1548.9 257,-1531.28"></path>
+<polygon fill="#b23600" stroke="#b23600" stroke-width="2" points="260.5,-1531.06 257,-1521.06 253.5,-1531.06 260.5,-1531.06"></polygon>
+</a>
+</g>
+<g id="a_edge26-label"><a xlink:title="crypto/x509.(*Certificate).Verify -&gt; crypto/x509.systemRootsPool (3072.70kB)">
+<text text-anchor="middle" x="298" y="-1546.8" font-family="Times,serif" font-size="14.00"> 3072.70kB</text>
+</a>
+</g>
+</g>
+<!-- N45&#45;&gt;N1 -->
+<g id="edge34" class="edge">
+<title>N45-&gt;N1</title>
+<g id="a_edge34"><a xlink:title="crypto/x509.ParseCertificate -&gt; crypto/x509.parseCertificate (2048.16kB)">
+<path fill="none" stroke="#b24400" stroke-width="2" d="M257,-772.87C257,-758.28 257,-736.49 257,-716.16"></path>
+<polygon fill="#b24400" stroke="#b24400" stroke-width="2" points="260.5,-716.02 257,-706.02 253.5,-716.02 260.5,-716.02"></polygon>
+</a>
+</g>
+<g id="a_edge34-label"><a xlink:title="crypto/x509.ParseCertificate -&gt; crypto/x509.parseCertificate (2048.16kB)">
+<text text-anchor="middle" x="298" y="-727.8" font-family="Times,serif" font-size="14.00"> 2048.16kB</text>
+</a>
+</g>
+</g>
+<!-- N46&#45;&gt;N12 -->
+<g id="edge27" class="edge">
+<title>N46-&gt;N12</title>
+<g id="a_edge27"><a xlink:title="crypto/x509.initSystemRoots -&gt; crypto/x509.loadSystemRoots (3072.70kB)">
+<path fill="none" stroke="#b23600" stroke-width="2" d="M257,-1128.74C257,-1106.98 257,-1069.32 257,-1043.56"></path>
+<polygon fill="#b23600" stroke="#b23600" stroke-width="2" points="260.5,-1043.33 257,-1033.33 253.5,-1043.33 260.5,-1043.33"></polygon>
+</a>
+</g>
+<g id="a_edge27-label"><a xlink:title="crypto/x509.initSystemRoots -&gt; crypto/x509.loadSystemRoots (3072.70kB)">
+<text text-anchor="middle" x="298" y="-1088.3" font-family="Times,serif" font-size="14.00"> 3072.70kB</text>
+</a>
+</g>
+</g>
+<!-- N47&#45;&gt;N37 -->
+<g id="edge76" class="edge">
+<title>N47-&gt;N37</title>
+<g id="a_edge76"><a xlink:title="crypto/x509.parsePublicKey -&gt; crypto/elliptic.Unmarshal (512.02kB)">
+<path fill="none" stroke="#b2a085" d="M639,-431.66C639,-413.9 639,-386.04 639,-365.32"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="642.5,-365.22 639,-355.22 635.5,-365.22 642.5,-365.22"></polygon>
+</a>
+</g>
+<g id="a_edge76-label"><a xlink:title="crypto/x509.parsePublicKey -&gt; crypto/elliptic.Unmarshal (512.02kB)">
+<text text-anchor="middle" x="675.5" y="-376.8" font-family="Times,serif" font-size="14.00"> 512.02kB</text>
+</a>
+</g>
+</g>
+<!-- N48&#45;&gt;N26 -->
+<g id="edge72" class="edge">
+<title>N48-&gt;N26</title>
+<g id="a_edge72"><a xlink:title="crypto/x509.readUniqueDirectoryEntries ... os.newUnixDirent (512.03kB)">
+<path fill="none" stroke="#b2a085" stroke-dasharray="1,5" d="M105.86,-879.66C103.67,-867.52 100.63,-850.75 97.8,-835.12"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="101.21,-834.29 95.98,-825.07 94.32,-835.54 101.21,-834.29"></polygon>
+</a>
+</g>
+<g id="a_edge72-label"><a xlink:title="crypto/x509.readUniqueDirectoryEntries ... os.newUnixDirent (512.03kB)">
+<text text-anchor="middle" x="138.5" y="-846.8" font-family="Times,serif" font-size="14.00"> 512.03kB</text>
+</a>
+</g>
+</g>
+<!-- N49&#45;&gt;N9 -->
+<g id="edge28" class="edge">
+<title>N49-&gt;N9</title>
+<g id="a_edge28"><a xlink:title="crypto/x509.systemRootsPool -&gt; sync.(*Once).Do (3072.70kB)">
+<path fill="none" stroke="#b23600" stroke-width="2" d="M257,-1484.78C257,-1462.82 257,-1424.45 257,-1397.26"></path>
+<polygon fill="#b23600" stroke="#b23600" stroke-width="2" points="260.5,-1397.1 257,-1387.1 253.5,-1397.1 260.5,-1397.1"></polygon>
+</a>
+</g>
+<g id="a_edge28-label"><a xlink:title="crypto/x509.systemRootsPool -&gt; sync.(*Once).Do (3072.70kB)">
+<text text-anchor="middle" x="298" y="-1451.8" font-family="Times,serif" font-size="14.00"> 3072.70kB</text>
+<text text-anchor="middle" x="298" y="-1436.8" font-family="Times,serif" font-size="14.00"> (inline)</text>
+</a>
+</g>
+</g>
+<!-- N50 -->
+<g id="node50" class="node">
+<title>N50</title>
+<g id="a_node50"><a xlink:title="io.CopyN (516.01kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="1324.5,-2075 1217.5,-2075 1217.5,-2039 1324.5,-2039 1324.5,-2075"></polygon>
+<text text-anchor="middle" x="1271" y="-2064.1" font-family="Times,serif" font-size="8.00">io</text>
+<text text-anchor="middle" x="1271" y="-2055.1" font-family="Times,serif" font-size="8.00">CopyN</text>
+<text text-anchor="middle" x="1271" y="-2046.1" font-family="Times,serif" font-size="8.00">0 of 516.01kB (5.04%)</text>
+</a>
+</g>
+</g>
+<!-- N50&#45;&gt;N29 -->
+<g id="edge59" class="edge">
+<title>N50-&gt;N29</title>
+<g id="a_edge59"><a xlink:title="io.CopyN -&gt; io.Copy (516.01kB)">
+<path fill="none" stroke="#b2a085" d="M1271,-2038.87C1271,-2014.67 1271,-1970.21 1271,-1941.39"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="1274.5,-1941.19 1271,-1931.19 1267.5,-1941.19 1274.5,-1941.19"></polygon>
+</a>
+</g>
+<g id="a_edge59-label"><a xlink:title="io.CopyN -&gt; io.Copy (516.01kB)">
+<text text-anchor="middle" x="1307.5" y="-1983.8" font-family="Times,serif" font-size="14.00"> 516.01kB</text>
+<text text-anchor="middle" x="1307.5" y="-1968.8" font-family="Times,serif" font-size="14.00"> (inline)</text>
+</a>
+</g>
+</g>
+<!-- N52 -->
+<g id="node52" class="node">
+<title>N52</title>
+<g id="a_node52"><a xlink:title="main.(*ObjectBuilder).resolveBase (1033.68kB)">
+<polygon fill="#ede7e1" stroke="#b28558" points="1031.5,-1935 914.5,-1935 914.5,-1891 1031.5,-1891 1031.5,-1935"></polygon>
+<text text-anchor="middle" x="973" y="-1924.6" font-family="Times,serif" font-size="8.00">main</text>
+<text text-anchor="middle" x="973" y="-1915.6" font-family="Times,serif" font-size="8.00">(*ObjectBuilder)</text>
+<text text-anchor="middle" x="973" y="-1906.6" font-family="Times,serif" font-size="8.00">resolveBase</text>
+<text text-anchor="middle" x="973" y="-1897.6" font-family="Times,serif" font-size="8.00">0 of 1033.68kB (10.10%)</text>
+</a>
+</g>
+</g>
+<!-- N51&#45;&gt;N52 -->
+<g id="edge45" class="edge">
+<title>N51-&gt;N52</title>
+<g id="a_edge45"><a xlink:title="main.(*ObjectBuilder).buildObject -&gt; main.(*ObjectBuilder).resolveBase (1033.68kB)">
+<path fill="none" stroke="#b28558" d="M946.64,-2034.74C951.82,-2011 960.26,-1972.36 966.19,-1945.2"></path>
+<polygon fill="#b28558" stroke="#b28558" points="969.61,-1945.92 968.33,-1935.4 962.77,-1944.43 969.61,-1945.92"></polygon>
+</a>
+</g>
+<g id="a_edge45-label"><a xlink:title="main.(*ObjectBuilder).buildObject -&gt; main.(*ObjectBuilder).resolveBase (1033.68kB)">
+<text text-anchor="middle" x="1003" y="-1976.3" font-family="Times,serif" font-size="14.00"> 1033.68kB</text>
+</a>
+</g>
+</g>
+<!-- N52&#45;&gt;N11 -->
+<g id="edge46" class="edge">
+<title>N52-&gt;N11</title>
+<g id="a_edge46"><a xlink:title="main.(*ObjectBuilder).resolveBase -&gt; main.(*ObjectBuilder).readObjectData (1033.68kB)">
+<path fill="none" stroke="#b28558" d="M978.31,-1890.91C981.91,-1876.63 986.85,-1857 991.63,-1838.05"></path>
+<polygon fill="#b28558" stroke="#b28558" points="995.05,-1838.78 994.1,-1828.23 988.26,-1837.07 995.05,-1838.78"></polygon>
+</a>
+</g>
+<g id="a_edge46-label"><a xlink:title="main.(*ObjectBuilder).resolveBase -&gt; main.(*ObjectBuilder).readObjectData (1033.68kB)">
+<text text-anchor="middle" x="1030" y="-1849.8" font-family="Times,serif" font-size="14.00"> 1033.68kB</text>
+</a>
+</g>
+</g>
+<!-- N53&#45;&gt;N34 -->
+<g id="edge41" class="edge">
+<title>N53-&gt;N34</title>
+<g id="a_edge41"><a xlink:title="main.(*ObjectStorer).writeCompressed -&gt; compress/zlib.(*Writer).Write (1451.43kB)">
+<path fill="none" stroke="#b26c33" d="M807,-1890.91C807,-1868.84 807,-1833.96 807,-1808.61"></path>
+<polygon fill="#b26c33" stroke="#b26c33" points="810.5,-1808.39 807,-1798.39 803.5,-1808.39 810.5,-1808.39"></polygon>
+</a>
+</g>
+<g id="a_edge41-label"><a xlink:title="main.(*ObjectStorer).writeCompressed -&gt; compress/zlib.(*Writer).Write (1451.43kB)">
+<text text-anchor="middle" x="848" y="-1849.8" font-family="Times,serif" font-size="14.00"> 1451.43kB</text>
+</a>
+</g>
+</g>
+<!-- N54&#45;&gt;N28 -->
+<g id="edge77" class="edge">
+<title>N54-&gt;N28</title>
+<g id="a_edge77"><a xlink:title="main.(*RepoBuilder).CreateRefs ... strings.(*Builder).grow (512.01kB)">
+<path fill="none" stroke="#b2a085" stroke-dasharray="1,5" d="M1085.69,-2163.74C1088.87,-2149.32 1093.22,-2129.57 1097.31,-2111.04"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="1100.74,-2111.73 1099.47,-2101.21 1093.9,-2110.22 1100.74,-2111.73"></polygon>
+</a>
+</g>
+<g id="a_edge77-label"><a xlink:title="main.(*RepoBuilder).CreateRefs ... strings.(*Builder).grow (512.01kB)">
+<text text-anchor="middle" x="1131.5" y="-2122.8" font-family="Times,serif" font-size="14.00"> 512.01kB</text>
+</a>
+</g>
+</g>
+<!-- N55&#45;&gt;N50 -->
+<g id="edge61" class="edge">
+<title>N55-&gt;N50</title>
+<g id="a_edge61"><a xlink:title="main.DemuxNegotiationResponse -&gt; io.CopyN (516.01kB)">
+<path fill="none" stroke="#b2a085" d="M1247.64,-2167.87C1252.15,-2146.66 1259.89,-2110.28 1265.21,-2085.23"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="1268.67,-2085.77 1267.33,-2075.26 1261.83,-2084.32 1268.67,-2085.77"></polygon>
+</a>
+</g>
+<g id="a_edge61-label"><a xlink:title="main.DemuxNegotiationResponse -&gt; io.CopyN (516.01kB)">
+<text text-anchor="middle" x="1294.5" y="-2122.8" font-family="Times,serif" font-size="14.00"> 516.01kB</text>
+</a>
+</g>
+</g>
+<!-- N56&#45;&gt;N2 -->
+<g id="edge17" class="edge">
+<title>N56-&gt;N2</title>
+<g id="a_edge17"><a xlink:title="main.main -&gt; main.handleClone (4025.17kB)">
+<path fill="none" stroke="#b22b00" stroke-width="2" d="M942,-2411.69C942,-2393.25 942,-2363.82 942,-2342.26"></path>
+<polygon fill="#b22b00" stroke="#b22b00" stroke-width="2" points="945.5,-2342.1 942,-2332.1 938.5,-2342.1 945.5,-2342.1"></polygon>
+</a>
+</g>
+<g id="a_edge17-label"><a xlink:title="main.main -&gt; main.handleClone (4025.17kB)">
+<text text-anchor="middle" x="983" y="-2378.8" font-family="Times,serif" font-size="14.00"> 4025.17kB</text>
+</a>
+</g>
+</g>
+<!-- N57 -->
+<g id="node57" class="node">
+<title>N57</title>
+<g id="a_node57"><a xlink:title="net.(*Resolver).exchange (512.28kB)">
+<polygon fill="#edeae7" stroke="#b2a085" points="1649.5,-2336 1542.5,-2336 1542.5,-2292 1649.5,-2292 1649.5,-2336"></polygon>
+<text text-anchor="middle" x="1596" y="-2325.6" font-family="Times,serif" font-size="8.00">net</text>
+<text text-anchor="middle" x="1596" y="-2316.6" font-family="Times,serif" font-size="8.00">(*Resolver)</text>
+<text text-anchor="middle" x="1596" y="-2307.6" font-family="Times,serif" font-size="8.00">exchange</text>
+<text text-anchor="middle" x="1596" y="-2298.6" font-family="Times,serif" font-size="8.00">0 of 512.28kB (5.00%)</text>
+</a>
+</g>
+</g>
+<!-- N57&#45;&gt;N22 -->
+<g id="edge65" class="edge">
+<title>N57-&gt;N22</title>
+<g id="a_edge65"><a xlink:title="net.(*Resolver).exchange -&gt; net.newRequest (512.28kB)">
+<path fill="none" stroke="#b2a085" d="M1596,-2291.91C1596,-2275.13 1596,-2251.09 1596,-2230.25"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="1599.5,-2230.02 1596,-2220.02 1592.5,-2230.02 1599.5,-2230.02"></polygon>
+</a>
+</g>
+<g id="a_edge65-label"><a xlink:title="net.(*Resolver).exchange -&gt; net.newRequest (512.28kB)">
+<text text-anchor="middle" x="1632.5" y="-2241.8" font-family="Times,serif" font-size="14.00"> 512.28kB</text>
+</a>
+</g>
+</g>
+<!-- N58&#45;&gt;N4 -->
+<g id="edge50" class="edge">
+<title>N58-&gt;N4</title>
+<g id="a_edge50"><a xlink:title="net.(*Resolver).goLookupIPCNAMEOrder ... net.open (544.67kB)">
+<path fill="none" stroke="#b29e83" stroke-dasharray="1,5" d="M506.43,-1661.83C499.02,-1636.03 488,-1591.01 488,-1551.5 488,-1551.5 488,-1551.5 488,-1146 488,-1119.28 486.08,-1089.54 484.02,-1065.25"></path>
+<polygon fill="#b29e83" stroke="#b29e83" points="487.5,-1064.86 483.13,-1055.2 480.53,-1065.47 487.5,-1064.86"></polygon>
+</a>
+</g>
+<g id="a_edge50-label"><a xlink:title="net.(*Resolver).goLookupIPCNAMEOrder ... net.open (544.67kB)">
+<text text-anchor="middle" x="524.5" y="-1361.3" font-family="Times,serif" font-size="14.00"> 544.67kB</text>
+</a>
+</g>
+</g>
+<!-- N59&#45;&gt;N18 -->
+<g id="edge43" class="edge">
+<title>N59-&gt;N18</title>
+<g id="a_edge43"><a xlink:title="net.(*Resolver).lookupIPAddr.func1 ... net.(*Resolver).lookupIP (1089.33kB)">
+<path fill="none" stroke="#b28253" stroke-dasharray="1,5" d="M440,-2030.28C440,-2006.51 440,-1971.1 440,-1945.61"></path>
+<polygon fill="#b28253" stroke="#b28253" points="443.5,-1945.35 440,-1935.35 436.5,-1945.35 443.5,-1945.35"></polygon>
+</a>
+</g>
+<g id="a_edge43-label"><a xlink:title="net.(*Resolver).lookupIPAddr.func1 ... net.(*Resolver).lookupIP (1089.33kB)">
+<text text-anchor="middle" x="481" y="-1976.3" font-family="Times,serif" font-size="14.00"> 1089.33kB</text>
+</a>
+</g>
+</g>
+<!-- N60&#45;&gt;N57 -->
+<g id="edge67" class="edge">
+<title>N60-&gt;N57</title>
+<g id="a_edge67"><a xlink:title="net.(*Resolver).tryOneName -&gt; net.(*Resolver).exchange (512.28kB)">
+<path fill="none" stroke="#b2a085" d="M1596,-2407.82C1596,-2390.55 1596,-2365.89 1596,-2346.33"></path>
+<polygon fill="#b2a085" stroke="#b2a085" points="1599.5,-2346.06 1596,-2336.06 1592.5,-2346.06 1599.5,-2346.06"></polygon>
+</a>
+</g>
+<g id="a_edge67-label"><a xlink:title="net.(*Resolver).tryOneName -&gt; net.(*Resolver).exchange (512.28kB)">
+<text text-anchor="middle" x="1632.5" y="-2378.8" font-family="Times,serif" font-size="14.00"> 512.28kB</text>
+</a>
+</g>
+</g>
+<!-- N62 -->
+<g id="node62" class="node">
+<title>N62</title>
+<g id="a_node62"><a xlink:title="net.(*conf).lookupOrder (544.67kB)">
+<polygon fill="#edeae6" stroke="#b29e83" points="440.5,-1632 333.5,-1632 333.5,-1588 440.5,-1588 440.5,-1632"></polygon>
+<text text-anchor="middle" x="387" y="-1621.6" font-family="Times,serif" font-size="8.00">net</text>
+<text text-anchor="middle" x="387" y="-1612.6" font-family="Times,serif" font-size="8.00">(*conf)</text>
+<text text-anchor="middle" x="387" y="-1603.6" font-family="Times,serif" font-size="8.00">lookupOrder</text>
+<text text-anchor="middle" x="387" y="-1594.6" font-family="Times,serif" font-size="8.00">0 of 544.67kB (5.32%)</text>
+</a>
+</g>
+</g>
+<!-- N61&#45;&gt;N62 -->
+<g id="edge53" class="edge">
+<title>N61-&gt;N62</title>
+<g id="a_edge53"><a xlink:title="net.(*conf).hostLookupOrder -&gt; net.(*conf).lookupOrder (544.67kB)">
+<path fill="none" stroke="#b29e83" d="M389.23,-1753.79C382.02,-1740.56 373.73,-1722.89 370,-1706 365.79,-1686.9 366.87,-1681.3 370,-1662 371.06,-1655.47 372.84,-1648.65 374.85,-1642.19"></path>
+<polygon fill="#b29e83" stroke="#b29e83" points="378.26,-1643.05 378.14,-1632.45 371.62,-1640.8 378.26,-1643.05"></polygon>
+</a>
+</g>
+<g id="a_edge53-label"><a xlink:title="net.(*conf).hostLookupOrder -&gt; net.(*conf).lookupOrder (544.67kB)">
+<text text-anchor="middle" x="406.5" y="-1680.3" font-family="Times,serif" font-size="14.00"> 544.67kB</text>
+</a>
+</g>
+</g>
+<!-- N64 -->
+<g id="node64" class="node">
+<title>N64</title>
+<g id="a_node64"><a xlink:title="net.(*resolverConfig).tryUpdate (544.67kB)">
+<polygon fill="#edeae6" stroke="#b29e83" points="440.5,-1525 333.5,-1525 333.5,-1481 440.5,-1481 440.5,-1525"></polygon>
+<text text-anchor="middle" x="387" y="-1514.6" font-family="Times,serif" font-size="8.00">net</text>
+<text text-anchor="middle" x="387" y="-1505.6" font-family="Times,serif" font-size="8.00">(*resolverConfig)</text>
+<text text-anchor="middle" x="387" y="-1496.6" font-family="Times,serif" font-size="8.00">tryUpdate</text>
+<text text-anchor="middle" x="387" y="-1487.6" font-family="Times,serif" font-size="8.00">0 of 544.67kB (5.32%)</text>
+</a>
+</g>
+</g>
+<!-- N62&#45;&gt;N64 -->
+<g id="edge54" class="edge">
+<title>N62-&gt;N64</title>
+<g id="a_edge54"><a xlink:title="net.(*conf).lookupOrder ... net.(*resolverConfig).tryUpdate (544.67kB)">
+<path fill="none" stroke="#b29e83" stroke-dasharray="1,5" d="M387,-1587.75C387,-1572.67 387,-1552.17 387,-1535.23"></path>
+<polygon fill="#b29e83" stroke="#b29e83" points="390.5,-1535.22 387,-1525.22 383.5,-1535.22 390.5,-1535.22"></polygon>
+</a>
+</g>
+<g id="a_edge54-label"><a xlink:title="net.(*conf).lookupOrder ... net.(*resolverConfig).tryUpdate (544.67kB)">
+<text text-anchor="middle" x="423.5" y="-1546.8" font-family="Times,serif" font-size="14.00"> 544.67kB</text>
+</a>
+</g>
+</g>
+<!-- N63&#45;&gt;N4 -->
+<g id="edge55" class="edge">
+<title>N63-&gt;N4</title>
+<g id="a_edge55"><a xlink:title="net.(*resolverConfig).init ... net.open (544.67kB)">
+<path fill="none" stroke="#b29e83" stroke-dasharray="1,5" d="M387.5,-1124.99C388.71,-1110.55 392.07,-1091.45 401,-1077 404.13,-1071.94 407.83,-1067.14 411.9,-1062.61"></path>
+<polygon fill="#b29e83" stroke="#b29e83" points="414.6,-1064.86 419.06,-1055.25 409.58,-1059.98 414.6,-1064.86"></polygon>
+</a>
+</g>
+<g id="a_edge55-label"><a xlink:title="net.(*resolverConfig).init ... net.open (544.67kB)">
+<text text-anchor="middle" x="437.5" y="-1088.3" font-family="Times,serif" font-size="14.00"> 544.67kB</text>
+</a>
+</g>
+</g>
+<!-- N64&#45;&gt;N9 -->
+<g id="edge56" class="edge">
+<title>N64-&gt;N9</title>
+<g id="a_edge56"><a xlink:title="net.(*resolverConfig).tryUpdate -&gt; sync.(*Once).Do (544.67kB)">
+<path fill="none" stroke="#b29e83" d="M375.98,-1480.78C367.95,-1466.42 356.2,-1447.5 343,-1433 329.67,-1418.35 312.87,-1404.49 297.67,-1393.21"></path>
+<polygon fill="#b29e83" stroke="#b29e83" points="299.57,-1390.26 289.42,-1387.22 295.45,-1395.93 299.57,-1390.26"></polygon>
+</a>
+</g>
+<g id="a_edge56-label"><a xlink:title="net.(*resolverConfig).tryUpdate -&gt; sync.(*Once).Do (544.67kB)">
+<text text-anchor="middle" x="401.5" y="-1451.8" font-family="Times,serif" font-size="14.00"> 544.67kB</text>
+<text text-anchor="middle" x="401.5" y="-1436.8" font-family="Times,serif" font-size="14.00"> (inline)</text>
+</a>
+</g>
+</g>
+</g>
+</svg>
+
+  </div>
+  <script>
+
+
+function initPanAndZoom(svg, clickHandler) {
+  'use strict';
+
+  
+  const IDLE = 0;
+  const MOUSEPAN = 1;
+  const TOUCHPAN = 2;
+  const TOUCHZOOM = 3;
+  let mode = IDLE;
+
+  
+  let currentScale = 1.0;
+  const initWidth = svg.viewBox.baseVal.width;
+  const initHeight = svg.viewBox.baseVal.height;
+
+  
+  let panLastX = 0;      
+  let panLastY = 0;      
+  let moved = false;     
+  let touchid = null;    
+
+  
+  let touchid2 = null;     
+  let initGap = 1.0;       
+  let initScale = 1.0;     
+  let centerPoint = null;  
+
+  
+  function toSvg(x, y) {
+    const p = svg.createSVGPoint();
+    p.x = x;
+    p.y = y;
+    let m = svg.getCTM();
+    if (m == null) m = svg.getScreenCTM(); 
+    return p.matrixTransform(m.inverse());
+  }
+
+  
+  
+  function rescale(s, u) {
+    
+    if (s < 0.2) s = 0.2;
+    if (s > 10.0) s = 10.0;
+
+    currentScale = s;
+
+    
+    
+    
+    const vb = svg.viewBox;
+    const w1 = vb.baseVal.width;
+    const w2 = initWidth / s;
+    const h1 = vb.baseVal.height;
+    const h2 = initHeight / s;
+    vb.baseVal.width = w2;
+    vb.baseVal.height = h2;
+
+    
+    
+    
+    
+    
+    
+    
+    vb.baseVal.x = u.x - (u.x - vb.baseVal.x) * (w2 / w1);
+    vb.baseVal.y = u.y - (u.y - vb.baseVal.y) * (h2 / h1);
+  }
+
+  function handleWheel(e) {
+    if (e.deltaY == 0) return;
+    
+    rescale(currentScale * (e.deltaY < 0 ? 1.1 : (1/1.1)),
+            toSvg(e.offsetX, e.offsetY));
+  }
+
+  function setMode(m) {
+    mode = m;
+    touchid = null;
+    touchid2 = null;
+  }
+
+  function panStart(x, y) {
+    moved = false;
+    panLastX = x;
+    panLastY = y;
+  }
+
+  function panMove(x, y) {
+    let dx = x - panLastX;
+    let dy = y - panLastY;
+    if (Math.abs(dx) <= 2 && Math.abs(dy) <= 2) return; 
+
+    moved = true;
+    panLastX = x;
+    panLastY = y;
+
+    
+    const swidth = svg.clientWidth || svg.parentNode.clientWidth;
+    const sheight = svg.clientHeight || svg.parentNode.clientHeight;
+
+    
+    dx *= (svg.viewBox.baseVal.width / swidth);
+    dy *= (svg.viewBox.baseVal.height / sheight);
+
+    svg.viewBox.baseVal.x -= dx;
+    svg.viewBox.baseVal.y -= dy;
+  }
+
+  function handleScanStart(e) {
+    if (e.button != 0) return; 
+    setMode(MOUSEPAN);
+    panStart(e.clientX, e.clientY);
+    e.preventDefault();
+    svg.addEventListener('mousemove', handleScanMove);
+  }
+
+  function handleScanMove(e) {
+    if (e.buttons == 0) {
+      
+      setMode(IDLE);
+      svg.removeEventListener('mousemove', handleScanMove);
+      return;
+    }
+    if (mode == MOUSEPAN) panMove(e.clientX, e.clientY);
+  }
+
+  function handleScanEnd(e) {
+    if (mode == MOUSEPAN) panMove(e.clientX, e.clientY);
+    setMode(IDLE);
+    svg.removeEventListener('mousemove', handleScanMove);
+    if (!moved) clickHandler(e.target);
+  }
+
+  
+  function findTouch(tlist, id) {
+    for (const t of tlist) {
+      if (t.identifier == id) return t;
+    }
+    return null;
+  }
+
+  
+  function touchGap(t1, t2) {
+    const dx = t1.clientX - t2.clientX;
+    const dy = t1.clientY - t2.clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  function handleTouchStart(e) {
+    if (mode == IDLE && e.changedTouches.length == 1) {
+      
+      const t = e.changedTouches[0];
+      setMode(TOUCHPAN);
+      touchid = t.identifier;
+      panStart(t.clientX, t.clientY);
+      e.preventDefault();
+    } else if (mode == TOUCHPAN && e.touches.length == 2) {
+      
+      setMode(TOUCHZOOM);
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      touchid = t1.identifier;
+      touchid2 = t2.identifier;
+      initScale = currentScale;
+      initGap = touchGap(t1, t2);
+      centerPoint = toSvg((t1.clientX + t2.clientX) / 2,
+                          (t1.clientY + t2.clientY) / 2);
+      e.preventDefault();
+    }
+  }
+
+  function handleTouchMove(e) {
+    if (mode == TOUCHPAN) {
+      const t = findTouch(e.changedTouches, touchid);
+      if (t == null) return;
+      if (e.touches.length != 1) {
+        setMode(IDLE);
+        return;
+      }
+      panMove(t.clientX, t.clientY);
+      e.preventDefault();
+    } else if (mode == TOUCHZOOM) {
+      
+      const t1 = findTouch(e.touches, touchid);
+      const t2 = findTouch(e.touches, touchid2);
+      if (t1 == null || t2 == null) return;
+      const gap = touchGap(t1, t2);
+      rescale(initScale * gap / initGap, centerPoint);
+      e.preventDefault();
+    }
+  }
+
+  function handleTouchEnd(e) {
+    if (mode == TOUCHPAN) {
+      const t = findTouch(e.changedTouches, touchid);
+      if (t == null) return;
+      panMove(t.clientX, t.clientY);
+      setMode(IDLE);
+      e.preventDefault();
+      if (!moved) clickHandler(t.target);
+    } else if (mode == TOUCHZOOM) {
+      setMode(IDLE);
+      e.preventDefault();
+    }
+  }
+
+  svg.addEventListener('mousedown', handleScanStart);
+  svg.addEventListener('mouseup', handleScanEnd);
+  svg.addEventListener('touchstart', handleTouchStart);
+  svg.addEventListener('touchmove', handleTouchMove);
+  svg.addEventListener('touchend', handleTouchEnd);
+  svg.addEventListener('wheel', handleWheel, true);
+}
+
+function initMenus() {
+  'use strict';
+
+  let activeMenu = null;
+  let activeMenuHdr = null;
+
+  function cancelActiveMenu() {
+    if (activeMenu == null) return;
+    activeMenu.style.display = 'none';
+    activeMenu = null;
+    activeMenuHdr = null;
+  }
+
+  
+  for (const menu of document.getElementsByClassName('submenu')) {
+    const hdr = menu.parentElement;
+    if (hdr == null) return;
+    if (hdr.classList.contains('disabled')) return;
+    function showMenu(e) {
+      
+      
+      if (e.target.parentElement != hdr) return;
+      activeMenu = menu;
+      activeMenuHdr = hdr;
+      menu.style.display = 'block';
+    }
+    hdr.addEventListener('mousedown', showMenu);
+    hdr.addEventListener('touchstart', showMenu);
+  }
+
+  
+  for (const t of ['mousedown', 'touchstart']) {
+    document.addEventListener(t, (e) => {
+      
+      
+      if (activeMenuHdr != e.target.closest('.menu-item')) {
+        cancelActiveMenu();
+      }
+    }, { passive: true, capture: true });
+  }
+
+  
+  document.addEventListener('mouseup', (e) => {
+    if (activeMenu == e.target.closest('.submenu')) {
+      cancelActiveMenu();
+    }
+  }, { passive: true, capture: true });
+}
+
+function sendURL(method, url, done) {
+  fetch(url.toString(), {method: method})
+      .then((response) => { done(response.ok); })
+      .catch((error) => { done(false); });
+}
+
+
+function initConfigManager() {
+  'use strict';
+
+  
+  function elem(id) {
+    const result = document.getElementById(id);
+    if (!result) console.warn('element ' + id + ' not found');
+    return result;
+  }
+  const overlay = elem('dialog-overlay');
+  const saveDialog = elem('save-dialog');
+  const saveInput = elem('save-name');
+  const saveError = elem('save-error');
+  const delDialog = elem('delete-dialog');
+  const delPrompt = elem('delete-prompt');
+  const delError = elem('delete-error');
+
+  let currentDialog = null;
+  let currentDeleteTarget = null;
+
+  function showDialog(dialog) {
+    if (currentDialog != null) {
+      overlay.style.display = 'none';
+      currentDialog.style.display = 'none';
+    }
+    currentDialog = dialog;
+    if (dialog != null) {
+      overlay.style.display = 'block';
+      dialog.style.display = 'block';
+    }
+  }
+
+  function cancelDialog(e) {
+    showDialog(null);
+  }
+
+  
+  function showSaveDialog(e) {
+    saveError.innerText = '';
+    showDialog(saveDialog);
+    saveInput.focus();
+  }
+
+  
+  function commitSave(e) {
+    const name = saveInput.value;
+    const url = new URL(document.URL);
+    
+    url.pathname = new URL('./saveconfig', document.URL).pathname;
+    url.searchParams.set('config', name);
+    saveError.innerText = '';
+    sendURL('POST', url, (ok) => {
+      if (!ok) {
+        saveError.innerText = 'Save failed';
+      } else {
+        showDialog(null);
+        location.reload();  
+      }
+    });
+  }
+
+  function handleSaveInputKey(e) {
+    if (e.key === 'Enter') commitSave(e);
+  }
+
+  function deleteConfig(e, elem) {
+    e.preventDefault();
+    const config = elem.dataset.config;
+    delPrompt.innerText = 'Delete ' + config + '?';
+    currentDeleteTarget = elem;
+    showDialog(delDialog);
+  }
+
+  function commitDelete(e, elem) {
+    if (!currentDeleteTarget) return;
+    const config = currentDeleteTarget.dataset.config;
+    const url = new URL('./deleteconfig', document.URL);
+    url.searchParams.set('config', config);
+    delError.innerText = '';
+    sendURL('DELETE', url, (ok) => {
+      if (!ok) {
+        delError.innerText = 'Delete failed';
+        return;
+      }
+      showDialog(null);
+      
+      if (currentDeleteTarget && currentDeleteTarget.parentElement) {
+        currentDeleteTarget.parentElement.remove();
+      }
+    });
+  }
+
+  
+  function bind(event, elem, fn) {
+    if (elem == null) return;
+    elem.addEventListener(event, fn);
+    if (event == 'click') {
+      
+      elem.addEventListener('touchstart', fn);
+    }
+  }
+
+  bind('click', elem('save-config'), showSaveDialog);
+  bind('click', elem('save-cancel'), cancelDialog);
+  bind('click', elem('save-confirm'), commitSave);
+  bind('keydown', saveInput, handleSaveInputKey);
+
+  bind('click', elem('delete-cancel'), cancelDialog);
+  bind('click', elem('delete-confirm'), commitDelete);
+
+  
+  for (const del of Array.from(document.getElementsByClassName('menu-delete-btn'))) {
+    bind('click', del, (e) => {
+      deleteConfig(e, del);
+    });
+  }
+}
+
+
+
+
+
+
+function viewer(baseUrl, nodes, options) {
+  'use strict';
+
+  
+  const search = document.getElementById('search');
+  const graph0 = document.getElementById('graph0');
+  const svg = (graph0 == null ? null : graph0.parentElement);
+  const toptable = document.getElementById('toptable');
+
+  let regexpActive = false;
+  let selected = new Map();
+  let origFill = new Map();
+  let searchAlarm = null;
+  let buttonsEnabled = true;
+
+  
+  function getSelection() {
+    if (selected.size > 0) {
+      return selected;
+    } else if (options && options.current) {
+      return options.current();
+    }
+    return new Map();
+  }
+
+  function handleDetails(e) {
+    e.preventDefault();
+    const detailsText = document.getElementById('detailsbox');
+    if (detailsText != null) {
+      if (detailsText.style.display === 'block') {
+        detailsText.style.display = 'none';
+      } else {
+        detailsText.style.display = 'block';
+      }
+    }
+  }
+
+  function handleKey(e) {
+    if (e.keyCode != 13) return;
+    setHrefParams(window.location, function (params) {
+      params.set('f', search.value);
+    });
+    e.preventDefault();
+  }
+
+  function handleSearch() {
+    
+    if (searchAlarm != null) {
+      clearTimeout(searchAlarm);
+    }
+    searchAlarm = setTimeout(selectMatching, 300);
+
+    regexpActive = true;
+    updateButtons();
+  }
+
+  function selectMatching() {
+    searchAlarm = null;
+    let re = null;
+    if (search.value != '') {
+      try {
+        re = new RegExp(search.value);
+      } catch (e) {
+        
+        return;
+      }
+    }
+
+    function match(text) {
+      return re != null && re.test(text);
+    }
+
+    
+    selected.forEach(function(v, n) {
+      if (!match(nodes[n])) {
+        unselect(n);
+      }
+    })
+
+    
+    if (nodes) {
+      for (let n = 0; n < nodes.length; n++) {
+        if (!selected.has(n) && match(nodes[n])) {
+          select(n);
+        }
+      }
+    }
+
+    updateButtons();
+  }
+
+  function toggleSvgSelect(elem) {
+    
+    while (elem != null && elem.parentElement != graph0) {
+      elem = elem.parentElement;
+    }
+    if (!elem) return;
+
+    
+    regexpActive = false;
+
+    const n = nodeId(elem);
+    if (n < 0) return;
+    if (selected.has(n)) {
+      unselect(n);
+    } else {
+      select(n);
+    }
+    updateButtons();
+  }
+
+  function unselect(n) {
+    if (setNodeHighlight(n, false)) selected.delete(n);
+  }
+
+  function select(n, elem) {
+    if (setNodeHighlight(n, true)) selected.set(n, true);
+  }
+
+  function nodeId(elem) {
+    const id = elem.id;
+    if (!id) return -1;
+    if (!id.startsWith('node')) return -1;
+    const n = parseInt(id.slice(4), 10);
+    if (isNaN(n)) return -1;
+    if (n < 0 || n >= nodes.length) return -1;
+    return n;
+  }
+
+  
+  function setNodeHighlight(n, set) {
+    if (options && options.hiliter) return options.hiliter(n, set);
+
+    const elem = document.getElementById('node' + n);
+    if (!elem) return false;
+
+    
+    if (elem.nodeName == 'TR') {
+      elem.classList.toggle('hilite', set);
+      return true;
+    }
+
+    
+    const p = findPolygon(elem);
+    if (p != null) {
+      if (set) {
+        origFill.set(p, p.style.fill);
+        p.style.fill = '#ccccff';
+      } else if (origFill.has(p)) {
+        p.style.fill = origFill.get(p);
+      }
+    }
+
+    return true;
+  }
+
+  function findPolygon(elem) {
+    if (elem.localName == 'polygon') return elem;
+    for (const c of elem.children) {
+      const p = findPolygon(c);
+      if (p != null) return p;
+    }
+    return null;
+  }
+
+  function setSampleIndexLink(si) {
+    const elem = document.getElementById('sampletype-' + si);
+    if (elem != null) {
+      setHrefParams(elem, function (params) {
+        params.set("si", si);
+      });
+    }
+  }
+
+  
+  
+  function makeSearchLinkDynamic(id) {
+    const elem = document.getElementById(id);
+    if (elem == null) return;
+
+    
+    
+    let param = 'f';
+    if (id == 'ignore') param = 'i';
+    if (id == 'hide') param = 'h';
+    if (id == 'show') param = 's';
+    if (id == 'show-from') param = 'sf';
+
+    
+    elem.addEventListener('mouseenter', updater);
+    elem.addEventListener('touchstart', updater);
+
+    function updater() {
+      
+      
+      let re = regexpActive
+          ? search.value
+          : Array.from(getSelection().keys()).map(key => pprofQuoteMeta(nodes[key])).join('|');
+
+      setHrefParams(elem, function (params) {
+        if (re != '') {
+          
+          if (param != 'f' && param != 's' && param != 'sf' && params.has(param)) {
+            const old = params.get(param);
+            if (old != '') {
+              re += '|' + old;
+            }
+          }
+          params.set(param, re);
+        } else {
+          params.delete(param);
+        }
+      });
+    }
+  }
+
+  function setHrefParams(elem, paramSetter) {
+    let url = new URL(elem.href);
+    url.hash = '';
+
+    
+    const params = url.searchParams;
+    for (const p of new URLSearchParams(window.location.search)) {
+      params.set(p[0], p[1]);
+    }
+
+    
+    paramSetter(params);
+
+    elem.href = url.toString();
+  }
+
+  function handleTopClick(e) {
+    
+    let elem = e.target;
+    while (elem != null && elem.nodeName != 'TR') {
+      elem = elem.parentElement;
+    }
+    if (elem == null || elem.children.length < 6) return;
+
+    e.preventDefault();
+    const tr = elem;
+    const td = elem.children[5];
+    if (td.nodeName != 'TD') return;
+    const name = td.innerText;
+    const index = nodes.indexOf(name);
+    if (index < 0) return;
+
+    
+    regexpActive = false;
+
+    if (selected.has(index)) {
+      unselect(index, elem);
+    } else {
+      select(index, elem);
+    }
+    updateButtons();
+  }
+
+  function updateButtons() {
+    const enable = (search.value != '' || getSelection().size != 0);
+    if (buttonsEnabled == enable) return;
+    buttonsEnabled = enable;
+    for (const id of ['focus', 'ignore', 'hide', 'show', 'show-from']) {
+      const link = document.getElementById(id);
+      if (link != null) {
+        link.classList.toggle('disabled', !enable);
+      }
+    }
+  }
+
+  
+  updateButtons();
+
+  
+  initMenus();
+  if (svg != null) {
+    initPanAndZoom(svg, toggleSvgSelect);
+  }
+  if (toptable != null) {
+    toptable.addEventListener('mousedown', handleTopClick);
+    toptable.addEventListener('touchstart', handleTopClick);
+  }
+
+  const ids = ['topbtn', 'graphbtn',
+               'flamegraph',
+               'peek', 'list',
+               'disasm', 'focus', 'ignore', 'hide', 'show', 'show-from'];
+  ids.forEach(makeSearchLinkDynamic);
+
+  const sampleIDs = ['alloc_objects', 'alloc_space', 'inuse_objects', 'inuse_space', ];
+  sampleIDs.forEach(setSampleIndexLink);
+
+  
+  function addAction(id, action) {
+    const btn = document.getElementById(id);
+    if (btn != null) {
+      btn.addEventListener('click', action);
+      btn.addEventListener('touchstart', action);
+    }
+  }
+
+  addAction('details', handleDetails);
+  initConfigManager();
+
+  search.addEventListener('input', handleSearch);
+  search.addEventListener('keydown', handleKey);
+
+  
+  const main = document.getElementById('bodycontainer');
+  if (main) {
+    main.focus();
+  }
+}
+
+
+function pprofQuoteMeta(str) {
+  return '^' + str.replace(/([\\\.?+*\[\](){}|^$])/g, '\\$1') + '$';
+}
+</script>
+
+  <script>viewer(new URL(window.location.href), ["","crypto/x509.parseCertificate","main.handleClone","runtime.main","net.open","runtime.allocm","net/http.(*persistConn).addTLS.func2","main.(*ObjectBuilder).ForEachObject","compress/flate.NewWriter","sync.(*Once).Do","sync.(*Once).doSlow","main.(*ObjectBuilder).readObjectData","crypto/x509.loadSystemRoots","crypto/x509.(*CertPool).AppendCertsFromPEM","main.(*ObjectStorer).Store","runtime.schedule","compress/flate.(*compressor).initDeflate","internal/singleflight.(*Group).doCall","net.(*Resolver).lookupIP","io.copyBuffer","runtime.mstart","encoding/pem.Decode","net.newRequest","crypto/x509.parseName","os.newFile","crypto/x509/pkix.(*Name).FillFromRDNSequence","os.newUnixDirent","crypto/internal/fips140/nistec.NewP384Point","strings.(*Builder).grow","io.Copy","runtime.mcall","net.(*Resolver).goLookupIPCNAMEOrder.func3.1","compress/flate.(*compressor).init","compress/flate.NewWriterDict","compress/zlib.(*Writer).Write","compress/zlib.(*Writer).writeHeader","crypto/elliptic.(*nistCurve[go.shape.*uint8]).Unmarshal","crypto/elliptic.Unmarshal","crypto/tls.(*Conn).HandshakeContext","crypto/tls.(*Conn).clientHandshake","crypto/tls.(*Conn).handshakeContext","crypto/tls.(*Conn).verifyServerCertificate","crypto/tls.(*clientHandshakeStateTLS13).handshake","crypto/tls.(*clientHandshakeStateTLS13).readServerCertificate","crypto/x509.(*Certificate).Verify","crypto/x509.ParseCertificate","crypto/x509.initSystemRoots","crypto/x509.parsePublicKey","crypto/x509.readUniqueDirectoryEntries","crypto/x509.systemRootsPool","io.CopyN","main.(*ObjectBuilder).buildObject","main.(*ObjectBuilder).resolveBase","main.(*ObjectStorer).writeCompressed","main.(*RepoBuilder).CreateRefs","main.DemuxNegotiationResponse","main.main","net.(*Resolver).exchange","net.(*Resolver).goLookupIPCNAMEOrder","net.(*Resolver).lookupIPAddr.func1","net.(*Resolver).tryOneName","net.(*conf).hostLookupOrder","net.(*conf).lookupOrder","net.(*resolverConfig).init","net.(*resolverConfig).tryUpdate"]);</script>
+
+
+</body></html>
