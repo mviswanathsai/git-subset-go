@@ -2,6 +2,11 @@ package main
 
 import "github.com/codecrafters-io/git-starter-go/internal/git"
 
+const (
+	OP_CODE_COPY   = 1
+	OP_CODE_INSERT = 0
+)
+
 type PackNode interface {
 	Type() uint8
 	ParentOffset() uint64
@@ -76,5 +81,5 @@ type InsertOp struct {
 }
 
 func (InsertOp) kind() byte {
-	return OP_COPE_INSERT
+	return OP_CODE_INSERT
 }
